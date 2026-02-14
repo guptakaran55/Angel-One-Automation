@@ -115,13 +115,17 @@ def fetch_instrument_list():
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_candle_data(symbol_token):
+    """
+    Fetch daily candles. 365 days gives ~250 trading days, enough for SMA(200).
+    SMA(200) now means 200 DAYS (~10 months), RSI = daily momentum, etc.
+    """
     if not ensure_session(): return None
     try:
         to_d = datetime.now()
-        from_d = to_d - timedelta(days=60)
+        from_d = to_d - timedelta(days=365)
         resp = smart_api.getCandleData({
             "exchange": "NSE", "symboltoken": str(symbol_token),
-            "interval": "FIFTEEN_MINUTE",
+            "interval": "ONE_DAY",
             "fromdate": from_d.strftime("%Y-%m-%d %H:%M"),
             "todate": to_d.strftime("%Y-%m-%d %H:%M"),
         })
