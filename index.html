@@ -20,8 +20,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-h
 .dot{width:6px;height:6px;border-radius:50%}.dot.on{background:var(--gn);animation:p1 2s infinite}.dot.off{background:var(--rd)}.dot.w{background:var(--am);animation:p2 2s infinite}
 @keyframes p1{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}}
 @keyframes p2{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.5)}50%{box-shadow:0 0 0 5px rgba(245,158,11,0)}}
-.btn{padding:6px 12px;border:1px solid var(--bd);border-radius:7px;background:var(--cd);color:var(--t1);font-size:11px;font-weight:600;cursor:pointer}.btn:active{transform:scale(.97)}
+.btn{padding:6px 12px;border:1px solid var(--bd);border-radius:7px;background:var(--cd);color:var(--t1);font-size:11px;font-weight:600;cursor:pointer;transition:.1s}.btn:active{transform:scale(.97)}
 .btn-g{background:linear-gradient(135deg,var(--gn),#059669);border:none;color:#fff}.btn-g:disabled{opacity:.5}
+.btn-sm{padding:4px 8px;font-size:10px;border-radius:5px}
+.btn-r{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.2)}
+.btn-pu{background:rgba(139,92,246,.12);color:var(--pu);border:1px solid rgba(139,92,246,.2)}
 .mn{max-width:1400px;margin:0 auto;padding:14px}
 .sts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .st{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px}
@@ -37,12 +40,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-h
 .idx-btn.a[data-idx="NIFTY 100"]{background:var(--cy);border-color:var(--cy)}
 .idx-btn.a[data-idx="BSE 100"]{background:var(--or);border-color:var(--or)}
 .idx-btn.a[data-idx="MIDCAP 150"]{background:#ec4899;border-color:#ec4899}
+.idx-btn.a[data-idx="watchlist"]{background:var(--pu);border-color:var(--pu)}
 .idx-cnt{font-family:'JetBrains Mono',monospace;font-size:10px;opacity:.8}
 .tabs{display:flex;gap:2px;background:var(--bg2);padding:3px;border-radius:9px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .tab{padding:7px 12px;border-radius:6px;font-size:11px;font-weight:600;color:var(--t3);cursor:pointer;border:none;background:transparent;white-space:nowrap;display:flex;align-items:center;gap:5px;flex-shrink:0}
 .tab.a{background:var(--cd);color:var(--t1);box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .tc{padding:1px 5px;border-radius:7px;font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700}
-.tcg{background:var(--gg);color:var(--gn)}.tcr{background:var(--rg);color:var(--rd)}.tcb{background:rgba(59,130,246,.12);color:var(--bl)}
+.tcg{background:var(--gg);color:var(--gn)}.tcr{background:var(--rg);color:var(--rd)}.tcb{background:rgba(59,130,246,.12);color:var(--bl)}.tcp{background:rgba(139,92,246,.12);color:var(--pu)}
 .srch{position:relative;margin-bottom:12px}.srch input{width:100%;padding:9px 12px 9px 34px;background:var(--cd);border:1px solid var(--bd);border-radius:9px;color:var(--t1);font-size:13px;outline:none}.srch input:focus{border-color:var(--bl)}.srch input::placeholder{color:var(--t3)}.srch::before{content:'⌕';position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:14px}
 .tc2{background:var(--cd);border:1px solid var(--bd);border-radius:11px;overflow:hidden}.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}
 table{width:100%;border-collapse:collapse;font-size:11px}thead{position:sticky;top:0;z-index:5}
@@ -53,16 +57,15 @@ tr{transition:background .1s}tr:active{background:var(--cdh)}
 .pb{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;background:rgba(139,92,246,.12);color:var(--pu);margin-left:4px}
 .itag{display:inline-block;padding:1px 4px;border-radius:3px;font-size:7px;font-weight:700;margin-left:3px}
 .itag-n50{background:rgba(124,58,237,.15);color:#a78bfa}.itag-n100{background:rgba(6,182,212,.15);color:var(--cy)}.itag-bse{background:rgba(249,115,22,.15);color:var(--or)}.itag-mid{background:rgba(236,72,153,.15);color:#f472b6}
-/* Score chip */
 .score{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;cursor:pointer;display:inline-block;min-width:40px;text-align:center}
-.score-buy{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.25)}
-.score-buy.strong{background:rgba(16,185,129,.2);box-shadow:0 0 8px rgba(16,185,129,.15)}
+.score-buy{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.25)}.score-buy.strong{background:rgba(16,185,129,.2);box-shadow:0 0 8px rgba(16,185,129,.15)}
 .score-sell{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.25)}
-.ds{display:flex;gap:3px}.d{width:6px;height:6px;border-radius:50%;flex-shrink:0}.d.p{background:var(--rd);opacity:1;box-shadow:0 0 4px rgba(239,68,68,.4)}.d.f{background:var(--t3);opacity:.2}
+.ds{display:flex;gap:3px}.d{width:6px;height:6px;border-radius:50%;flex-shrink:0}.d.p{background:var(--rd);box-shadow:0 0 4px rgba(239,68,68,.4)}.d.f{background:var(--t3);opacity:.2}
 .rr{font-size:10px;font-weight:600}.rr-good{color:var(--gn)}.rr-ok{color:var(--am)}.rr-bad{color:var(--rd)}
+.macd-slope{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:3px}
+.slope-up{color:var(--gn)}.slope-dn{color:var(--rd)}.slope-flat{color:var(--t3)}
 .sig{padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.3px}
 .sig-b{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.2)}.sig-mb{background:rgba(6,182,212,.1);color:var(--cy);border:1px solid rgba(6,182,212,.2)}.sig-s{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.2)}.sig-h{background:rgba(100,116,139,.06);color:var(--t3);border:1px solid rgba(100,116,139,.1)}
-/* Modal */
 .mo{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fi .15s}
 @media(min-width:768px){.mo{align-items:center;padding:24px}}@keyframes fi{from{opacity:0}to{opacity:1}}
 .moc{background:var(--cd);border:1px solid var(--bd2);border-radius:14px 14px 0 0;width:100%;max-height:88dvh;overflow-y:auto;animation:su .2s ease}
@@ -76,18 +79,20 @@ tr{transition:background .1s}tr:active{background:var(--cdh)}
 .ict{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--t2)}
 .ics{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px}.ics.p{background:var(--gg);color:var(--gn)}.ics.f{background:var(--rg);color:var(--rd)}
 .icv{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace}.icd{font-size:9px;color:var(--t3);margin-top:3px}
-/* Score bar in modal */
-.sbar{width:100%;height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden;margin-top:4px}
-.sbar-f{height:100%;border-radius:4px;transition:width .3s}
-.setup{text-align:center;padding:50px 20px;max-width:460px;margin:0 auto}
-.setup h2{font-size:18px;margin:12px 0 8px}.setup p{color:var(--t2);font-size:13px;line-height:1.6;margin-bottom:14px}
-.setup code{display:block;background:var(--bg2);border:1px solid var(--bd);border-radius:7px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--gn);text-align:left;margin:10px 0;white-space:pre;overflow-x:auto}
+.sbar{width:100%;height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden;margin-top:4px}.sbar-f{height:100%;border-radius:4px;transition:width .3s}
+.sr-row{display:flex;gap:10px;margin-top:12px;padding:12px;background:var(--bg2);border:1px solid var(--bd);border-radius:8px}.sr-item{flex:1;text-align:center}.sr-label{font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.4px}.sr-val{font-size:16px;font-weight:800;font-family:'JetBrains Mono',monospace;margin-top:2px}
+/* Watchlist bar */
+.wl-bar{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.wl-chip{padding:5px 12px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(139,92,246,.3);background:rgba(139,92,246,.08);color:var(--pu);display:flex;align-items:center;gap:5px}
+.wl-chip.a{background:var(--pu);color:#fff;border-color:var(--pu)}
+.wl-chip .x{font-size:13px;opacity:.6;cursor:pointer;margin-left:2px}.wl-chip .x:hover{opacity:1}
+.wl-add-btn{padding:5px 10px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px dashed var(--bd2);background:transparent;color:var(--t3)}
+.wl-input{padding:5px 10px;border-radius:16px;font-size:11px;border:1px solid var(--pu);background:var(--bg2);color:var(--t1);outline:none;width:120px}
+.setup{text-align:center;padding:50px 20px;max-width:460px;margin:0 auto}.setup h2{font-size:18px;margin:12px 0 8px}.setup p{color:var(--t2);font-size:13px;line-height:1.6;margin-bottom:14px}.setup code{display:block;background:var(--bg2);border:1px solid var(--bd);border-radius:7px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--gn);text-align:left;margin:10px 0;white-space:pre;overflow-x:auto}
 .miss{display:inline-block;padding:2px 8px;border-radius:4px;background:var(--rg);color:var(--rd);font-size:11px;font-weight:600;margin:2px}
 .ld{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 0;color:var(--t3)}
 .sp{width:28px;height:28px;border:3px solid var(--bd);border-top-color:var(--gn);border-radius:50%;animation:spn .7s linear infinite;margin-bottom:10px}@keyframes spn{to{transform:rotate(360deg)}}
 .empty{text-align:center;padding:40px 16px;color:var(--t3)}
-.sr-row{display:flex;gap:10px;margin-top:12px;padding:12px;background:var(--bg2);border:1px solid var(--bd);border-radius:8px}
-.sr-item{flex:1;text-align:center}.sr-label{font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.4px}.sr-val{font-size:16px;font-weight:800;font-family:'JetBrains Mono',monospace;margin-top:2px}
 @media(max-width:600px){.sts{grid-template-columns:repeat(2,1fr)}.stv{font-size:17px}.mn{padding:10px}}
 </style>
 </head>
@@ -97,27 +102,34 @@ tr{transition:background .1s}tr:active{background:var(--cdh)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
-const {useState,useEffect,useCallback,useMemo}=React;
+const {useState,useEffect,useCallback,useMemo,useRef}=React;
 const API=window.location.origin;
 const fmt=(n,d=2)=>n!=null?Number(n).toFixed(d):'—';
 const ago=(iso)=>{if(!iso)return'Never';const d=(Date.now()-new Date(iso).getTime())/1e3;if(d<60)return`${Math.floor(d)}s`;if(d<3600)return`${Math.floor(d/60)}m`;return`${Math.floor(d/3600)}h`};
 const ITAG_CLS={"NIFTY 50":"itag-n50","NIFTY 100":"itag-n100","BSE 100":"itag-bse","MIDCAP 150":"itag-mid"};
 
+// Persist watchlists in localStorage
+function loadWL(){try{return JSON.parse(localStorage.getItem('ss_watchlists'))||{}}catch(e){return{}}}
+function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
+
 function ITags({indices}){if(!indices||!indices.length)return null;return<>{indices.map(i=><span key={i}className={`itag ${ITAG_CLS[i]||''}`}>{i}</span>)}</>}
 function SellDots({c}){return<div className="ds">{Object.keys(c).map(k=><div key={k}className={`d ${c[k]?'p':'f'}`}title={k}/>)}</div>}
+function RR({ratio}){if(!ratio||ratio<=0)return<span className="rr rr-bad">—</span>;const cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';return<span className={`rr ${cl}`}>{ratio.toFixed(1)}:1</span>}
 
-function RR({ratio}){
-  if(!ratio||ratio<=0) return<span className="rr rr-bad">—</span>;
-  const cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';
-  return<span className={`rr ${cl}`}>{ratio.toFixed(1)}:1</span>
+function MACDSlope({slope}){
+  if(slope==null)return<span className="macd-slope slope-flat">—</span>;
+  const abs=Math.abs(slope);
+  if(abs<0.01)return<span className="macd-slope slope-flat">→ 0.00</span>;
+  if(slope>0)return<span className="macd-slope slope-up">↗ +{slope.toFixed(2)}</span>;
+  return<span className="macd-slope slope-dn">↘ {slope.toFixed(2)}</span>;
 }
 
-function Modal({s,onClose}){
+function Modal({s,onClose,watchlists,onAddToWL}){
   if(!s)return null;
-  const bb=s.buy_breakdown||{};
-  const sc=s.sell_conditions||{};
+  const bb=s.buy_breakdown||{};const sc=s.sell_conditions||{};
   const indicators=["sma200","rsi","bollinger","macd","obv","adx"];
   const sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI ≥ 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'}];
+  const wlNames=Object.keys(watchlists);
 
   return<div className="mo"onClick={onClose}><div className="moc"onClick={e=>e.stopPropagation()}>
     <div className="moh"><div>
@@ -128,9 +140,13 @@ function Modal({s,onClose}){
       </div>
       <div style={{marginTop:'2px'}}><ITags indices={s.indices}/></div>
       <div style={{marginTop:'4px',fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}>₹{fmt(s.price)}</div>
+      {wlNames.length>0&&<div style={{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'}}>
+        {wlNames.map(wn=>{const inIt=watchlists[wn]?.includes(s.symbol);
+          return<button key={wn}className={`btn btn-sm ${inIt?'btn-r':'btn-pu'}`}onClick={(e)=>{e.stopPropagation();onAddToWL(wn,s.symbol,!inIt)}}>{inIt?`✕ ${wn}`:`+ ${wn}`}</button>
+        })}
+      </div>}
     </div><button className="mox"onClick={onClose}>✕</button></div>
     <div className="mob">
-      {/* Buy Score big display */}
       <div style={{display:'flex',gap:'10px',marginBottom:'16px'}}>
         <div style={{flex:1,padding:'14px',background:'var(--gg)',borderRadius:'8px',textAlign:'center'}}>
           <div style={{fontSize:'9px',fontWeight:700,color:'var(--gn)',letterSpacing:'.5px'}}>BUY SCORE</div>
@@ -143,28 +159,16 @@ function Modal({s,onClose}){
           <SellDots c={sc}/>
         </div>
       </div>
-
-      {/* Support / Resistance / R:R */}
       <div className="sr-row">
         <div className="sr-item"><div className="sr-label">Support</div><div className="sr-val"style={{color:'var(--gn)'}}>₹{fmt(s.support)}</div></div>
         <div className="sr-item"><div className="sr-label">Resistance</div><div className="sr-val"style={{color:'var(--rd)'}}>₹{fmt(s.resistance)}</div></div>
-        <div className="sr-item"><div className="sr-label">R:R Ratio</div><div className="sr-val"><RR ratio={s.rr_ratio}/></div></div>
+        <div className="sr-item"><div className="sr-label">R:R</div><div className="sr-val"><RR ratio={s.rr_ratio}/></div></div>
+        <div className="sr-item"><div className="sr-label">MACD Slope</div><div className="sr-val"><MACDSlope slope={s.macd_slope}/></div></div>
       </div>
-
-      {/* Buy indicator breakdown */}
-      <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS (score breakdown)</h3>
-      <div className="ig"style={{marginBottom:'16px'}}>{indicators.map(k=>{
-        const b=bb[k];if(!b)return null;
-        const pct=b.max>0?(b.pts/b.max*100):0;
-        return<div className="ic"key={k}>
-          <div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={`ics ${b.pass?'p':'f'}`}>{b.pts}/{b.max}</span></div>
-          <div className="icv">{b.val!=null?b.val:'—'}</div>
-          <div className="sbar"><div className="sbar-f"style={{width:`${pct}%`,background:b.pass?'var(--gn)':'var(--rd)'}}/></div>
-          <div className="icd">{b.desc}</div>
-        </div>
+      <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
+      <div className="ig"style={{marginBottom:'16px'}}>{indicators.map(k=>{const b=bb[k];if(!b)return null;const pct=b.max>0?(b.pts/b.max*100):0;
+        return<div className="ic"key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={`ics ${b.pass?'p':'f'}`}>{b.pts}/{b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f"style={{width:`${pct}%`,background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
       })}</div>
-
-      {/* Sell indicators */}
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--rd)',marginBottom:'8px'}}>SELL INDICATORS</h3>
       <div className="ig">{sellI.map(i=><div className="ic"key={i.k}><div className="ich"><span className="ict">{i.t}</span><span className={`ics ${sc[i.k]?'p':'f'}`}>{sc[i.k]?'✓':'✗'}</span></div><div className="icd">{i.d}</div></div>)}</div>
     </div>
@@ -175,6 +179,19 @@ function App(){
   const[data,setData]=useState(null);const[status,setStatus]=useState(null);const[loading,setLoading]=useState(true);
   const[idxFilter,setIdxFilter]=useState('all');
   const[tab,setTab]=useState('all');const[search,setSearch]=useState('');const[sortK,setSortK]=useState('buy_score');const[sortA,setSortA]=useState(false);const[sel,setSel]=useState(null);
+  // Watchlists
+  const[watchlists,setWatchlists]=useState(loadWL);
+  const[activeWL,setActiveWL]=useState(null);
+  const[addingWL,setAddingWL]=useState(false);
+  const[newWLName,setNewWLName]=useState('');
+  const inputRef=useRef(null);
+
+  const setAndSaveWL=(w)=>{setWatchlists(w);saveWL(w)};
+  const createWL=(name)=>{if(!name.trim())return;const w={...watchlists,[name.trim()]:[]};setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
+  const deleteWL=(name)=>{const w={...watchlists};delete w[name];setAndSaveWL(w);if(activeWL===name)setActiveWL(null)};
+  const toggleInWL=(wlName,symbol,add)=>{const w={...watchlists};if(!w[wlName])w[wlName]=[];if(add&&!w[wlName].includes(symbol))w[wlName].push(symbol);if(!add)w[wlName]=w[wlName].filter(s=>s!==symbol);setAndSaveWL(w)};
+
+  useEffect(()=>{if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
 
   const fetchAll=useCallback(async()=>{try{const[r1,r2]=await Promise.all([fetch(`${API}/api/results`),fetch(`${API}/api/status`)]);setData(await r1.json());setStatus(await r2.json())}catch(e){}finally{setLoading(false)}},[]);
   useEffect(()=>{fetchAll();const t=setInterval(fetchAll,15000);return()=>clearInterval(t)},[fetchAll]);
@@ -184,35 +201,39 @@ function App(){
   const stocks=useMemo(()=>{
     if(!data)return[];
     let l=tab==='buy'?data.buy_signals||[]:tab==='sell'?data.sell_signals||[]:tab==='port'?(data.all_stocks||[]).filter(s=>s.in_portfolio):data.all_stocks||[];
-    if(idxFilter!=='all')l=l.filter(s=>s.indices&&s.indices.includes(idxFilter));
+    // Index filter
+    if(idxFilter==='watchlist'&&activeWL){
+      const syms=watchlists[activeWL]||[];
+      l=(data.all_stocks||[]).filter(s=>syms.includes(s.symbol));
+    } else if(idxFilter!=='all'&&idxFilter!=='watchlist'){
+      l=l.filter(s=>s.indices&&s.indices.includes(idxFilter));
+    }
     if(search){const q=search.toLowerCase();l=l.filter(s=>s.symbol.toLowerCase().includes(q)||s.name.toLowerCase().includes(q))}
     return[...l].sort((a,b)=>{const va=a[sortK],vb=b[sortK];if(va==null)return 1;if(vb==null)return-1;return sortA?(va>vb?1:-1):(va<vb?1:-1)})
-  },[data,idxFilter,tab,search,sortK,sortA]);
+  },[data,idxFilter,activeWL,watchlists,tab,search,sortK,sortA]);
 
   const filteredAll=useMemo(()=>{
     if(!data)return{all:0,buy:0,sell:0,port:0};
-    const f=s=>idxFilter==='all'||(s.indices&&s.indices.includes(idxFilter));
+    const f=s=>{
+      if(idxFilter==='watchlist'&&activeWL)return(watchlists[activeWL]||[]).includes(s.symbol);
+      if(idxFilter!=='all'&&idxFilter!=='watchlist')return s.indices&&s.indices.includes(idxFilter);
+      return true;
+    };
     return{all:(data.all_stocks||[]).filter(f).length,buy:(data.buy_signals||[]).filter(f).length,sell:(data.sell_signals||[]).filter(f).length,port:(data.all_stocks||[]).filter(s=>s.in_portfolio&&f(s)).length}
-  },[data,idxFilter]);
+  },[data,idxFilter,activeWL,watchlists]);
 
   if(loading)return<div className="ld"><div className="sp"/>Connecting...</div>;
-
   if(status&&!status.connected&&status.missing?.length>0){
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="bdg"><div className="dot off"/>OFFLINE</div></div></header>
-    <main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>🔐</div><h2>Credentials Required</h2><div>{status.missing.map(m=><span key={m}className="miss">{m}</span>)}</div><code>{`ANGEL_API_KEY=your_key\nANGEL_CLIENT_ID=your_id\nANGEL_PASSWORD=your_pin\nANGEL_TOTP_TOKEN=your_totp`}</code></div></main></>;
+    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="bdg"><div className="dot off"/>OFFLINE</div></div></header><main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>🔐</div><h2>Credentials Required</h2><div>{status.missing.map(m=><span key={m}className="miss">{m}</span>)}</div><code>{`ANGEL_API_KEY=your_key\nANGEL_CLIENT_ID=your_id\nANGEL_PASSWORD=your_pin\nANGEL_TOTP_TOKEN=your_totp`}</code></div></main></>;
   }
-
   if(!data||!data.last_scan||data.total_scanned===0){
     const sc=data?.status==='scanning';
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div>
-      <div className="hr"><div className="bdg"><div className={`dot ${sc?'w':'on'}`}/>{sc?'SCANNING':'READY'}</div>
-      {!sc&&<button className="btn btn-g"onClick={triggerScan}>▶ Scan</button>}</div>
-    </div></header>
-    <main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>{sc?'⏳':'📊'}</div><h2>{sc?'Scanning...':'Ready'}</h2><p>{sc?'Scanning ~250 stocks with daily candles. Takes ~5-8 min.':'Connected. Tap Scan or wait for auto-scan.'}</p>{sc&&<div className="sp"style={{margin:'16px auto'}}/>}</div></main></>;
+    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr"><div className="bdg"><div className={`dot ${sc?'w':'on'}`}/>{sc?'SCANNING':'READY'}</div>{!sc&&<button className="btn btn-g"onClick={triggerScan}>▶ Scan</button>}</div></div></header><main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>{sc?'⏳':'📊'}</div><h2>{sc?'Scanning...':'Ready'}</h2><p>{sc?'Scanning ~250 stocks. Takes ~5-8 min.':'Connected. Tap Scan or wait for auto-scan.'}</p>{sc&&<div className="sp"style={{margin:'16px auto'}}/>}</div></main></>;
   }
 
   const nB=(data.buy_signals||[]).length,nS=(data.sell_signals||[]).length,nT=data.total_scanned||0,nP=(data.portfolio_holdings||[]).length;
   const isSc=data.status==='scanning';const ic=data.index_counts||{};
+  const wlNames=Object.keys(watchlists);
 
   return<>
     <header className="hdr"><div className="hi">
@@ -223,16 +244,29 @@ function App(){
       <div className="sts">
         <div className="st"><div className="stl">Scanned</div><div className="stv"style={{color:'var(--bl)'}}>{nT}</div></div>
         <div className="st"><div className="stl">Buy Signals</div><div className="stv"style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">≥70/100</div></div>
-        <div className="st"><div className="stl">Sell</div><div className="stv"style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">≥3/5 portfolio</div></div>
+        <div className="st"><div className="stl">Sell</div><div className="stv"style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">≥3/5</div></div>
         <div className="st"><div className="stl">Portfolio</div><div className="stv"style={{color:'var(--pu)'}}>{nP}</div></div>
       </div>
 
+      {/* Index + Watchlist filter */}
       <div className="idx-row">
-        {[{k:'all',l:'All Indices',c:nT},{k:'NIFTY 50',l:'NIFTY 50',c:ic['NIFTY 50']||0},{k:'NIFTY 100',l:'NIFTY 100',c:ic['NIFTY 100']||0},{k:'BSE 100',l:'BSE 100',c:ic['BSE 100']||0},{k:'MIDCAP 150',l:'Midcap 150',c:ic['MIDCAP 150']||0}].map(x=>
-          <button key={x.k}className={`idx-btn ${idxFilter===x.k?'a':''}`}data-idx={x.k}onClick={()=>{setIdxFilter(x.k);setTab('all')}}>{x.l}<span className="idx-cnt">{x.c}</span></button>
+        {[{k:'all',l:'All',c:nT},{k:'NIFTY 50',l:'NIFTY 50',c:ic['NIFTY 50']||0},{k:'NIFTY 100',l:'NIFTY 100',c:ic['NIFTY 100']||0},{k:'BSE 100',l:'BSE 100',c:ic['BSE 100']||0},{k:'MIDCAP 150',l:'Midcap 150',c:ic['MIDCAP 150']||0}].map(x=>
+          <button key={x.k}className={`idx-btn ${idxFilter===x.k?'a':''}`}data-idx={x.k}onClick={()=>{setIdxFilter(x.k);setActiveWL(null);setTab('all')}}>{x.l}<span className="idx-cnt">{x.c}</span></button>
         )}
       </div>
 
+      {/* Watchlist bar */}
+      <div className="wl-bar">
+        <span style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'.5px'}}>Watchlists:</span>
+        {wlNames.map(wn=><div key={wn}className={`wl-chip ${idxFilter==='watchlist'&&activeWL===wn?'a':''}`}onClick={()=>{setIdxFilter('watchlist');setActiveWL(wn);setTab('all')}}>
+          {wn}<span className="idx-cnt">{(watchlists[wn]||[]).length}</span>
+          <span className="x"onClick={(e)=>{e.stopPropagation();if(confirm(`Delete "${wn}" watchlist?`))deleteWL(wn)}}>✕</span>
+        </div>)}
+        {addingWL?<form onSubmit={e=>{e.preventDefault();createWL(newWLName)}} style={{display:'flex',gap:'4px'}}><input ref={inputRef}className="wl-input"value={newWLName}onChange={e=>setNewWLName(e.target.value)}placeholder="Name..."onBlur={()=>setTimeout(()=>setAddingWL(false),200)}/><button type="submit"className="btn btn-sm btn-pu">Add</button></form>
+        :<button className="wl-add-btn"onClick={()=>setAddingWL(true)}>+ New Watchlist</button>}
+      </div>
+
+      {/* Signal tabs */}
       <div className="tabs">
         <button className={`tab ${tab==='all'?'a':''}`}onClick={()=>setTab('all')}>All<span className="tc tcb">{filteredAll.all}</span></button>
         <button className={`tab ${tab==='buy'?'a':''}`}onClick={()=>setTab('buy')}>Buy<span className="tc tcg">{filteredAll.buy}</span></button>
@@ -243,13 +277,14 @@ function App(){
       <div className="srch"><input placeholder="Search stock..."value={search}onChange={e=>setSearch(e.target.value)}/></div>
 
       <div className="tc2">
-        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div><div style={{fontSize:'13px'}}>{search?`No match for "${search}"`:'No data for this filter'}</div></div>
+        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{idxFilter==='watchlist'?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{idxFilter==='watchlist'&&activeWL?`"${activeWL}" is empty. Click a stock to add it.`:search?`No match for "${search}"`:'No data'}</div></div>
         :<div className="ts"><table>
           <thead><tr>
             <th onClick={()=>doSort('symbol')}>Stock</th>
             <th onClick={()=>doSort('price')}>Price</th>
             <th onClick={()=>doSort('buy_score')}>Buy Score</th>
             <th onClick={()=>doSort('sell_pct')}>Sell</th>
+            <th onClick={()=>doSort('macd_slope')}>MACD Slope</th>
             <th onClick={()=>doSort('rr_ratio')}>R:R</th>
             <th>Signal</th>
           </tr></thead>
@@ -258,13 +293,14 @@ function App(){
             <td style={{fontWeight:600}}>₹{fmt(s.price)}</td>
             <td><span className={`score score-buy ${s.buy_score>=80?'strong':''}`}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
+            <td><MACDSlope slope={s.macd_slope}/></td>
             <td><RR ratio={s.rr_ratio}/></td>
             <td>{s.buy_score>=80?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=70?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
           </tr>)}</tbody>
         </table></div>}
       </div>
     </main>
-    {sel&&<Modal s={sel}onClose={()=>setSel(null)}/>}
+    {sel&&<Modal s={sel}onClose={()=>setSel(null)}watchlists={watchlists}onAddToWL={toggleInWL}/>}
   </>
 }
 
