@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pyotp
 import requests
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from SmartApi import SmartConnect
 from index_data import build_index_map, get_all_symbols
@@ -308,6 +308,9 @@ def analyze_stock(df):
 
     cbm, cbu, cbl = bm.iloc[-1], bu.iloc[-1], bl.iloc[-1]
     cm, cms, cmh = ml.iloc[-1], ms.iloc[-1], mh.iloc[-1]
+    # MACD slope: difference between last 2 MACD line values (positive = rising)
+    cm_prev = ml.iloc[-2] if len(ml) >= 2 else cm
+    macd_slope = float(cm - cm_prev) if ok(cm) and ok(cm_prev) else 0
     co = ov.iloc[-1]
     co5 = ov.iloc[-5] if len(ov) >= 5 else ov.iloc[0]
     co20 = ov.iloc[-20] if len(ov) >= 20 else ov.iloc[0]
@@ -415,6 +418,7 @@ def analyze_stock(df):
         "macd": sf(cm, 4),
         "macd_signal": sf(cms, 4),
         "macd_hist": sf(cmh, 4),
+        "macd_slope": round(macd_slope, 4),
         "obv": sf(co, 0),
         "adx": sf(curr_adx),
         # Support / Resistance / Risk:Reward
@@ -542,6 +546,40 @@ def api_stock_detail(symbol):
 @app.route("/")
 def serve_frontend():
     return send_from_directory(".", "index.html")
+
+# ── Watchlist (stored server-side in memory, persists while app runs) ──
+watchlists = {}  # { "list_name": ["SYMBOL-EQ", ...] }
+
+@app.route("/api/watchlists")
+def api_get_watchlists():
+    return jsonify(watchlists)
+
+@app.route("/api/watchlists/<name>", methods=["PUT"])
+def api_create_watchlist(n):
+    if n not in watchlists:
+        watchlists[n] = []
+    return jsonify({"status": "created", "n": n})
+
+@app.route("/api/watchlists/<n>", methods=["DELETE"])
+def api_delete_watchlist(n):
+    watchlists.pop(n, None)
+    return jsonify({"status": "deleted"})
+
+@app.route("/api/watchlists/<n>/add", methods=["POST"])
+def api_watchlist_add(n):
+    symbol = request.json.get("symbol", "")
+    if n not in watchlists:
+        watchlists[n] = []
+    if symbol and symbol not in watchlists[n]:
+        watchlists[n].append(symbol)
+    return jsonify({"status": "added", "watchlist": watchlists[n]})
+
+@app.route("/api/watchlists/<n>/remove", methods=["POST"])
+def api_watchlist_remove(n):
+    symbol = request.json.get("symbol", "")
+    if n in watchlists and symbol in watchlists[n]:
+        watchlists[n].remove(symbol)
+    return jsonify({"status": "removed", "watchlist": watchlists.get(n, [])})
 
 # ═══════════════════════════════════════════════════════════════
 # INIT
