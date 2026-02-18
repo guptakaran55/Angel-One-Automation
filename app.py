@@ -1,23 +1,17 @@
 """
-SignalScope — Stock Signal Scanner (v2 — Weighted Scoring)
-Daily candles, 6 indicators, 100-point buy scoring system.
-Support/Resistance with Risk:Reward ratio.
+SignalScope v3 — Scans ALL NSE equities (~2000 stocks)
+Daily candles, 6 indicators, 100-point weighted scoring.
+Stocks tagged with known indices (NIFTY 50/100/200, BSE 100, Midcap 150)
+or "OTHER NSE" for everything else.
 """
 
-import os
-import time
-import threading
-import logging
+import os, time, threading, logging
 from datetime import datetime, timedelta
-
-import numpy as np
-import pandas as pd
-import pyotp
-import requests
+import numpy as np, pandas as pd, pyotp, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from SmartApi import SmartConnect
-from index_data import build_index_map, get_all_symbols
+from index_data import build_index_map, get_indices_for, INDEX_NAMES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -32,7 +26,6 @@ TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
 INDEX_MAP = build_index_map()
-ALL_SYMBOLS = get_all_symbols()
 
 smart_api = None
 refresh_token = None
@@ -44,7 +37,7 @@ scan_results = {
     "last_scan": None, "status": "not_started", "total_scanned": 0,
     "buy_signals": [], "sell_signals": [], "all_stocks": [],
     "portfolio_holdings": [], "errors": [],
-    "index_counts": {"NIFTY 50": 0, "NIFTY 100": 0, "BSE 100": 0, "MIDCAP 150": 0},
+    "index_counts": {n: 0 for n in INDEX_NAMES},
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -87,19 +80,25 @@ def ensure_session():
         return create_session()
 
 # ═══════════════════════════════════════════════════════════════
-# INSTRUMENTS
+# INSTRUMENTS — ALL NSE EQUITIES
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_instrument_list():
+    """Download ALL NSE equities from Angel One. No filtering."""
     global instrument_list
     try:
         url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        logger.info("Downloading instrument list...")
-        resp = requests.get(url, timeout=60)
+        logger.info("Downloading full instrument list...")
+        resp = requests.get(url, timeout=120)
         all_inst = resp.json()
-        eq = [i for i in all_inst if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")]
-        instrument_list = [i for i in eq if i["symbol"].replace("-EQ", "") in ALL_SYMBOLS]
-        logger.info(f"Loaded {len(instrument_list)} stocks (target: {len(ALL_SYMBOLS)})")
+
+        # Keep ALL NSE equities (symbols ending in -EQ)
+        instrument_list = [
+            i for i in all_inst
+            if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")
+        ]
+
+        logger.info(f"Loaded {len(instrument_list)} NSE equities (ALL stocks)")
         return True
     except Exception as e:
         logger.error(f"Instrument fetch failed: {e}")
@@ -110,7 +109,7 @@ def fetch_instrument_list():
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_candle_data(symbol_token):
-    """Fetch 365 days of daily candles. ~250 trading days for SMA(200)."""
+    """Fetch 365 days of daily candles."""
     if not ensure_session(): return None
     try:
         to_d = datetime.now()
@@ -149,300 +148,146 @@ def fetch_portfolio():
 # TECHNICAL INDICATORS
 # ═══════════════════════════════════════════════════════════════
 
-def calc_sma(s, p):
-    return s.rolling(window=p, min_periods=p).mean()
+def calc_sma(s, p): return s.rolling(window=p, min_periods=p).mean()
 
 def calc_rsi(s, p=14):
-    d = s.diff()
-    g = d.where(d > 0, 0.0)
-    l = -d.where(d < 0, 0.0)
-    ag = g.ewm(com=p-1, min_periods=p).mean()
-    al = l.ewm(com=p-1, min_periods=p).mean()
-    return 100 - (100 / (1 + ag / al))
+    d = s.diff(); g = d.where(d>0,0.0); l = -d.where(d<0,0.0)
+    ag = g.ewm(com=p-1,min_periods=p).mean(); al = l.ewm(com=p-1,min_periods=p).mean()
+    return 100 - (100/(1+ag/al))
 
 def calc_bb(s, p=20, sd=2):
-    m = calc_sma(s, p)
-    st = s.rolling(window=p, min_periods=p).std()
-    return m, m + sd * st, m - sd * st
+    m = calc_sma(s,p); st = s.rolling(window=p,min_periods=p).std()
+    return m, m+sd*st, m-sd*st
 
 def calc_macd(s, f=12, sl=26, sg=9):
-    ef = s.ewm(span=f, adjust=False).mean()
-    es = s.ewm(span=sl, adjust=False).mean()
-    ml = ef - es
-    sig = ml.ewm(span=sg, adjust=False).mean()
-    return ml, sig, ml - sig
+    ef = s.ewm(span=f,adjust=False).mean(); es = s.ewm(span=sl,adjust=False).mean()
+    ml = ef-es; sig = ml.ewm(span=sg,adjust=False).mean()
+    return ml, sig, ml-sig
 
 def calc_obv(close, vol):
-    r = pd.Series(index=close.index, dtype=float)
-    r.iloc[0] = 0
-    for i in range(1, len(close)):
-        if close.iloc[i] > close.iloc[i-1]:
-            r.iloc[i] = r.iloc[i-1] + vol.iloc[i]
-        elif close.iloc[i] < close.iloc[i-1]:
-            r.iloc[i] = r.iloc[i-1] - vol.iloc[i]
-        else:
-            r.iloc[i] = r.iloc[i-1]
+    r = pd.Series(index=close.index, dtype=float); r.iloc[0] = 0
+    for i in range(1,len(close)):
+        if close.iloc[i]>close.iloc[i-1]: r.iloc[i]=r.iloc[i-1]+vol.iloc[i]
+        elif close.iloc[i]<close.iloc[i-1]: r.iloc[i]=r.iloc[i-1]-vol.iloc[i]
+        else: r.iloc[i]=r.iloc[i-1]
     return r
 
 def calc_adx(high, low, close, p=14):
-    """Average Directional Index — measures trend strength (0-100)."""
-    plus_dm = high.diff()
-    minus_dm = low.diff().abs() * -1  # make positive for comparison
-
-    # Correct +DM / -DM logic
     pdf = pd.DataFrame({"ph": high.diff(), "pl": low.shift(1) - low})
     pdf["plus_dm"] = pdf.apply(lambda r: r["ph"] if r["ph"] > r["pl"] and r["ph"] > 0 else 0, axis=1)
     pdf["minus_dm"] = pdf.apply(lambda r: r["pl"] if r["pl"] > r["ph"] and r["pl"] > 0 else 0, axis=1)
-
-    tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
+    tr1 = high - low; tr2 = (high - close.shift(1)).abs(); tr3 = (low - close.shift(1)).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
     atr = tr.ewm(span=p, adjust=False).mean()
     plus_di = 100 * (pdf["plus_dm"].ewm(span=p, adjust=False).mean() / atr)
     minus_di = 100 * (pdf["minus_dm"].ewm(span=p, adjust=False).mean() / atr)
-
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
-    adx = dx.ewm(span=p, adjust=False).mean()
-    return adx
-
+    return dx.ewm(span=p, adjust=False).mean()
 
 def find_support_resistance(high, low, close, lookback=60):
-    """
-    Find nearest support and resistance levels using pivot points
-    and recent swing highs/lows.
-    """
     price = close.iloc[-1]
-    recent_high = high.iloc[-lookback:]
-    recent_low = low.iloc[-lookback:]
-    recent_close = close.iloc[-lookback:]
-
-    # Method 1: Swing highs and lows (local extrema over 5-day windows)
-    swing_highs = []
-    swing_lows = []
-    for i in range(2, len(recent_high) - 2):
-        if (recent_high.iloc[i] > recent_high.iloc[i-1] and
-            recent_high.iloc[i] > recent_high.iloc[i-2] and
-            recent_high.iloc[i] > recent_high.iloc[i+1] and
-            recent_high.iloc[i] >= recent_high.iloc[i+2]):
-            swing_highs.append(recent_high.iloc[i])
-        if (recent_low.iloc[i] < recent_low.iloc[i-1] and
-            recent_low.iloc[i] < recent_low.iloc[i-2] and
-            recent_low.iloc[i] < recent_low.iloc[i+1] and
-            recent_low.iloc[i] <= recent_low.iloc[i+2]):
-            swing_lows.append(recent_low.iloc[i])
-
-    # Method 2: Classic pivot point
-    pp_high = recent_high.iloc[-1]
-    pp_low = recent_low.iloc[-1]
-    pp_close = recent_close.iloc[-1]
-    pivot = (pp_high + pp_low + pp_close) / 3
-    r1 = 2 * pivot - pp_low
-    s1 = 2 * pivot - pp_high
-    r2 = pivot + (pp_high - pp_low)
-    s2 = pivot - (pp_high - pp_low)
-
-    # Combine all levels
-    resistance_levels = sorted(set([r1, r2] + [h for h in swing_highs if h > price]))
-    support_levels = sorted(set([s1, s2] + [l for l in swing_lows if l < price]), reverse=True)
-
-    # Nearest support (highest value below price)
-    support = None
-    for s in support_levels:
-        if s < price:
-            support = s
-            break
-
-    # Nearest resistance (lowest value above price)
-    resistance = None
-    for r in resistance_levels:
-        if r > price:
-            resistance = r
-            break
-
-    # Fallback
-    if support is None:
-        support = recent_low.min()
-    if resistance is None:
-        resistance = recent_high.max()
-
-    return round(float(support), 2), round(float(resistance), 2)
-
+    rh, rl, rc = high.iloc[-lookback:], low.iloc[-lookback:], close.iloc[-lookback:]
+    swing_highs, swing_lows = [], []
+    for i in range(2, len(rh)-2):
+        if rh.iloc[i]>rh.iloc[i-1] and rh.iloc[i]>rh.iloc[i-2] and rh.iloc[i]>rh.iloc[i+1] and rh.iloc[i]>=rh.iloc[i+2]:
+            swing_highs.append(rh.iloc[i])
+        if rl.iloc[i]<rl.iloc[i-1] and rl.iloc[i]<rl.iloc[i-2] and rl.iloc[i]<rl.iloc[i+1] and rl.iloc[i]<=rl.iloc[i+2]:
+            swing_lows.append(rl.iloc[i])
+    pivot = (rh.iloc[-1]+rl.iloc[-1]+rc.iloc[-1])/3
+    r1, s1 = 2*pivot-rl.iloc[-1], 2*pivot-rh.iloc[-1]
+    r2, s2 = pivot+(rh.iloc[-1]-rl.iloc[-1]), pivot-(rh.iloc[-1]-rl.iloc[-1])
+    res = sorted(set([r1,r2]+[h for h in swing_highs if h>price]))
+    sup = sorted(set([s1,s2]+[l for l in swing_lows if l<price]), reverse=True)
+    support = next((s for s in sup if s<price), rl.min())
+    resistance = next((r for r in res if r>price), rh.max())
+    return round(float(support),2), round(float(resistance),2)
 
 # ═══════════════════════════════════════════════════════════════
-# ANALYZE STOCK — WEIGHTED SCORING (100 POINTS)
+# ANALYZE — 100pt WEIGHTED SCORING
 # ═══════════════════════════════════════════════════════════════
 
 def analyze_stock(df):
-    """
-    Weighted buy scoring (out of 100):
-      SMA(200):  30 pts (binary)
-      RSI(14):   20 pts + 5 bonus if RSI ≤ 35
-      BB:        20 pts + 5 bonus if touched lower band
-      MACD:      15 pts
-      OBV:       10 pts
-      ADX(14):   15 pts + 5 bonus if ADX > 30
-
-    Sell scoring: same 5-condition system (3+/5 triggers sell)
-    """
-    if df is None or len(df) < 200:
-        return None
-
-    close = df["Close"]
-    high = df["High"]
-    low = df["Low"]
-    vol = df["Volume"]
+    if df is None or len(df) < 200: return None
+    close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
     price = close.iloc[-1]
-
     ok = lambda v: not pd.isna(v)
-    sf = lambda v, d=2: round(float(v), d) if ok(v) else None
+    sf = lambda v, d=2: round(float(v),d) if ok(v) else None
 
-    # ── Compute indicators ──
-    s200 = calc_sma(close, 200).iloc[-1]
-    r14 = calc_rsi(close, 14).iloc[-1]
-    bm, bu, bl = calc_bb(close, 20, 2)
-    ml, ms, mh = calc_macd(close)
-    ov = calc_obv(close, vol)
-    adx_series = calc_adx(high, low, close, 14)
+    s200 = calc_sma(close,200).iloc[-1]
+    r14 = calc_rsi(close,14).iloc[-1]
+    bm,bu,bl = calc_bb(close,20,2)
+    ml,ms,mh = calc_macd(close)
+    ov = calc_obv(close,vol)
+    adx_s = calc_adx(high,low,close,14)
 
-    cbm, cbu, cbl = bm.iloc[-1], bu.iloc[-1], bl.iloc[-1]
-    cm, cms, cmh = ml.iloc[-1], ms.iloc[-1], mh.iloc[-1]
-    # MACD slope: difference between last 2 MACD line values (positive = rising)
-    cm_prev = ml.iloc[-2] if len(ml) >= 2 else cm
-    macd_slope = float(cm - cm_prev) if ok(cm) and ok(cm_prev) else 0
+    cbm,cbu,cbl = bm.iloc[-1],bu.iloc[-1],bl.iloc[-1]
+    cm,cms,cmh = ml.iloc[-1],ms.iloc[-1],mh.iloc[-1]
+    cm_prev = ml.iloc[-2] if len(ml)>=2 else cm
+    macd_slope = float(cm-cm_prev) if ok(cm) and ok(cm_prev) else 0
     co = ov.iloc[-1]
-    co5 = ov.iloc[-5] if len(ov) >= 5 else ov.iloc[0]
-    co20 = ov.iloc[-20] if len(ov) >= 20 else ov.iloc[0]
-    curr_adx = adx_series.iloc[-1] if len(adx_series) > 0 and ok(adx_series.iloc[-1]) else 0
+    co5 = ov.iloc[-5] if len(ov)>=5 else ov.iloc[0]
+    co20 = ov.iloc[-20] if len(ov)>=20 else ov.iloc[0]
+    curr_adx = adx_s.iloc[-1] if len(adx_s)>0 and ok(adx_s.iloc[-1]) else 0
+    tlb = any(close.iloc[i]<=bl.iloc[i] for i in range(-5,0) if ok(bl.iloc[i]))
+    abm = bool(price<=cbm) if ok(cbm) else False
 
-    tlb = any(close.iloc[i] <= bl.iloc[i] for i in range(-5, 0) if ok(bl.iloc[i]))
-    at_or_below_mid = bool(price <= cbm) if ok(cbm) else False
+    support, resistance = find_support_resistance(high,low,close,60)
+    risk = round(price-support,2) if support else 0
+    reward = round(resistance-price,2) if resistance else 0
+    rr_ratio = round(reward/risk,2) if risk>0 else 0
 
-    # ── Support / Resistance ──
-    support, resistance = find_support_resistance(high, low, close, 60)
-    risk = round(price - support, 2) if support else 0
-    reward = round(resistance - price, 2) if resistance else 0
-    rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+    # ── BUY SCORE (100pt) ──
+    buy_score = 0; buy_breakdown = {}
 
-    # ══════════════════════════════════════════════════════════
-    # BUY SCORE (out of 100)
-    # ══════════════════════════════════════════════════════════
-    buy_score = 0
-    buy_breakdown = {}
+    sma_p = bool(price>s200) if ok(s200) else False
+    sma_pts = 30 if sma_p else 0; buy_score += sma_pts
+    buy_breakdown["sma200"] = {"pass":sma_p,"pts":sma_pts,"max":30,"val":sf(s200),"desc":"Close > SMA(200)"}
 
-    # 1. SMA(200) — 30 pts (all or nothing)
-    sma_pass = bool(price > s200) if ok(s200) else False
-    sma_pts = 30 if sma_pass else 0
-    buy_score += sma_pts
-    buy_breakdown["sma200"] = {"pass": sma_pass, "pts": sma_pts, "max": 30,
-                                "val": sf(s200), "desc": "Close > SMA(200)"}
+    rsi_p = bool(30<r14<=45) if ok(r14) else False
+    rsi_deep = bool(r14<=35) if ok(r14) else False
+    rsi_pts = (20 + (5 if rsi_deep else 0)) if rsi_p else 0; buy_score += rsi_pts
+    buy_breakdown["rsi"] = {"pass":rsi_p,"pts":rsi_pts,"max":25,"val":sf(r14),"desc":"RSI 30-45"+(" +bonus ≤35" if rsi_deep else "")}
 
-    # 2. RSI(14) — 20 pts + 5 bonus
-    rsi_pass = bool(30 < r14 <= 45) if ok(r14) else False
-    rsi_deep = bool(r14 <= 35) if ok(r14) else False
-    rsi_pts = 0
-    if ok(r14) and rsi_pass:
-        rsi_pts = 20
-        if rsi_deep:
-            rsi_pts += 5  # bonus for deeper dip
-    buy_score += rsi_pts
-    buy_breakdown["rsi"] = {"pass": rsi_pass, "pts": rsi_pts, "max": 25,
-                             "val": sf(r14), "desc": "RSI 30-45" + (" +bonus ≤35" if rsi_deep else "")}
+    bb_p = bool(abm or tlb) if ok(cbm) else False
+    bb_pts = (20 + (5 if tlb else 0)) if bb_p else 0; buy_score += bb_pts
+    buy_breakdown["bollinger"] = {"pass":bb_p,"pts":bb_pts,"max":25,"val":sf(cbm),"desc":"At/below mid BB"+(" +touched lower" if tlb else "")}
 
-    # 3. Bollinger Bands — 20 pts + 5 bonus
-    bb_pass = bool(at_or_below_mid or tlb) if ok(cbm) else False
-    bb_pts = 0
-    if bb_pass:
-        bb_pts = 20
-        if tlb:
-            bb_pts += 5  # bonus for touching lower band
-    buy_score += bb_pts
-    buy_breakdown["bollinger"] = {"pass": bb_pass, "pts": bb_pts, "max": 25,
-                                   "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
+    macd_p = bool(cm>cms and cmh>0) if ok(cm) and ok(cms) else False
+    macd_pts = 15 if macd_p else 0; buy_score += macd_pts
+    buy_breakdown["macd"] = {"pass":macd_p,"pts":macd_pts,"max":15,"val":sf(cm,4),"desc":"MACD > Signal, Hist > 0"}
 
-    # 4. MACD — 15 pts
-    macd_pass = bool(cm > cms and cmh > 0) if ok(cm) and ok(cms) else False
-    macd_pts = 15 if macd_pass else 0
-    buy_score += macd_pts
-    buy_breakdown["macd"] = {"pass": macd_pass, "pts": macd_pts, "max": 15,
-                              "val": sf(cm, 4), "desc": "MACD > Signal, Hist > 0"}
+    obv_p = bool(co>co5 and co>co20)
+    obv_pts = 10 if obv_p else 0; buy_score += obv_pts
+    buy_breakdown["obv"] = {"pass":obv_p,"pts":obv_pts,"max":10,"val":sf(co,0),"desc":"OBV rising vs 5d & 20d"}
 
-    # 5. OBV — 10 pts
-    obv_pass = bool(co > co5 and co > co20)
-    obv_pts = 10 if obv_pass else 0
-    buy_score += obv_pts
-    buy_breakdown["obv"] = {"pass": obv_pass, "pts": obv_pts, "max": 10,
-                             "val": sf(co, 0), "desc": "OBV rising vs 5d & 20d"}
+    adx_p = bool(curr_adx>25); adx_str = bool(curr_adx>30)
+    adx_pts = (15 + (5 if adx_str else 0)) if adx_p else 0; buy_score += adx_pts
+    buy_breakdown["adx"] = {"pass":adx_p,"pts":adx_pts,"max":20,"val":sf(curr_adx),"desc":"ADX > 25"+(" +bonus >30" if adx_str else "")}
 
-    # 6. ADX(14) — 15 pts + 5 bonus
-    adx_pass = bool(curr_adx > 25)
-    adx_strong = bool(curr_adx > 30)
-    adx_pts = 0
-    if adx_pass:
-        adx_pts = 15
-        if adx_strong:
-            adx_pts += 5  # bonus for very strong trend
-    buy_score += adx_pts
-    buy_breakdown["adx"] = {"pass": adx_pass, "pts": adx_pts, "max": 20,
-                             "val": sf(curr_adx), "desc": "ADX > 25" + (" +bonus >30" if adx_strong else "")}
+    buy_signal = "STRONG BUY" if buy_score>=80 else ("MODERATE BUY" if buy_score>=70 else "NO SIGNAL")
 
-    # Buy signal classification
-    if buy_score >= 80:
-        buy_signal = "STRONG BUY"
-    elif buy_score >= 70:
-        buy_signal = "MODERATE BUY"
-    else:
-        buy_signal = "NO SIGNAL"
-
-    # ══════════════════════════════════════════════════════════
-    # SELL SCORE (old system: 3+ of 5 triggers)
-    # ══════════════════════════════════════════════════════════
     sell_c = {
-        "trend_break": bool(price < s200) if ok(s200) else False,
-        "momentum_reversal": bool(r14 >= 65) if ok(r14) else False,
-        "volatility_extreme": bool(price >= cbu) if ok(cbu) else False,
-        "momentum_fade": bool(cm < cms and cmh < 0) if ok(cm) and ok(cms) else False,
-        "volume_weakness": bool(co < co5),
+        "trend_break": bool(price<s200) if ok(s200) else False,
+        "momentum_reversal": bool(r14>=65) if ok(r14) else False,
+        "volatility_extreme": bool(price>=cbu) if ok(cbu) else False,
+        "momentum_fade": bool(cm<cms and cmh<0) if ok(cm) and ok(cms) else False,
+        "volume_weakness": bool(co<co5),
     }
     sell_count = sum(sell_c.values())
-    sell_pct = sell_count / 5 * 100
 
     return {
-        "price": sf(price),
-        "sma200": sf(s200),
-        "rsi": sf(r14),
-        "bb_upper": sf(cbu),
-        "bb_mid": sf(cbm),
-        "bb_lower": sf(cbl),
-        "macd": sf(cm, 4),
-        "macd_signal": sf(cms, 4),
-        "macd_hist": sf(cmh, 4),
-        "macd_slope": round(macd_slope, 4),
-        "obv": sf(co, 0),
-        "adx": sf(curr_adx),
-        # Support / Resistance / Risk:Reward
-        "support": support,
-        "resistance": resistance,
-        "risk": risk,
-        "reward": reward,
-        "rr_ratio": rr_ratio,
-        # Buy scoring
-        "buy_score": buy_score,
-        "buy_signal": buy_signal,
-        "buy_breakdown": buy_breakdown,
-        # Sell scoring (kept simple)
-        "sell_conditions": sell_c,
-        "sell_count": f"{sell_count}/5",
-        "sell_pct": sell_pct,
-        "is_buy": buy_score >= 80,
-        "is_moderate_buy": buy_score >= 70,
-        "is_sell": sell_count >= 3,
+        "price":sf(price),"sma200":sf(s200),"rsi":sf(r14),
+        "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
+        "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
+        "macd_slope":round(macd_slope,4),"obv":sf(co,0),"adx":sf(curr_adx),
+        "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
+        "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
+        "sell_conditions":sell_c,"sell_count":f"{sell_count}/5","sell_pct":sell_count/5*100,
+        "is_buy":buy_score>=80,"is_moderate_buy":buy_score>=70,"is_sell":sell_count>=3,
     }
 
-
 # ═══════════════════════════════════════════════════════════════
-# SCAN
+# SCAN — ALL NSE EQUITIES
 # ═══════════════════════════════════════════════════════════════
 
 def run_full_scan():
@@ -454,51 +299,62 @@ def run_full_scan():
     is_scanning = True
     scan_results["status"] = "scanning"
 
-    logger.info(f"Scanning {len(instrument_list)} stocks...")
+    total = len(instrument_list)
+    logger.info(f"Starting FULL NSE scan: {total} stocks...")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
 
     portfolio = fetch_portfolio()
     ptokens = {h["token"] for h in portfolio}
-    idx_counts = {"NIFTY 50": 0, "NIFTY 100": 0, "BSE 100": 0, "MIDCAP 150": 0}
+    idx_counts = {n: 0 for n in INDEX_NAMES}
 
     for i, inst in enumerate(instrument_list):
         sym, token = inst["symbol"], inst["token"]
-        name = inst.get("name", sym.replace("-EQ", ""))
-        clean = sym.replace("-EQ", "")
+        name = inst.get("name", sym.replace("-EQ",""))
+        clean = sym.replace("-EQ","")
         try:
             df = fetch_candle_data(token)
             if df is None or len(df) < 200:
-                errs.append({"symbol": sym, "error": "Not enough data"})
+                errs.append({"symbol": sym, "error": "< 200 daily candles"})
                 continue
             a = analyze_stock(df)
             if a is None: continue
 
-            indices = INDEX_MAP.get(clean, [])
+            # Tag with known indices or OTHER NSE
+            indices = get_indices_for(clean, INDEX_MAP)
+
             stock = {"symbol": sym, "name": name, "token": token,
                      "in_portfolio": token in ptokens, "indices": indices, **a}
             all_s.append(stock)
+
             for ix in indices:
                 if ix in idx_counts: idx_counts[ix] += 1
+
             if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
             if a["is_sell"] and token in ptokens: sells.append(stock)
             time.sleep(0.35)
         except Exception as e:
             errs.append({"symbol": sym, "error": str(e)})
-        if (i+1) % 25 == 0:
-            logger.info(f"  {i+1}/{len(instrument_list)}...")
+
+        if (i+1) % 50 == 0:
+            elapsed_so_far = time.time() - t0
+            rate = (i+1) / elapsed_so_far if elapsed_so_far > 0 else 0
+            remaining = (total - i - 1) / rate / 60 if rate > 0 else 0
+            logger.info(f"  {i+1}/{total} ({len(all_s)} ok, {len(errs)} err) ~{remaining:.0f}m left")
 
     elapsed = time.time() - t0
     scan_results = {
         "last_scan": datetime.now().isoformat(), "status": "complete",
-        "scan_duration_sec": round(elapsed, 1), "total_scanned": len(all_s),
+        "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
         "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
         "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
         "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
         "portfolio_holdings": portfolio, "errors": errs, "index_counts": idx_counts,
     }
     is_scanning = False
-    logger.info(f"Done {elapsed:.0f}s — {len(all_s)} stocks, {len(buys)} buys, {len(sells)} sells")
+    logger.info(f"FULL SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys, {len(sells)} sells, {len(errs)} errors")
+    for ix, cnt in idx_counts.items():
+        if cnt > 0: logger.info(f"  {ix}: {cnt}")
 
 # ═══════════════════════════════════════════════════════════════
 # SCHEDULER
@@ -508,8 +364,8 @@ def scheduler():
     while True:
         now = datetime.now()
         wd = now.weekday() < 5
-        ao = (now.hour == 9 and now.minute >= 15) or now.hour >= 10
-        bc = now.hour < 15 or (now.hour == 15 and now.minute <= 30)
+        ao = (now.hour==9 and now.minute>=15) or now.hour>=10
+        bc = now.hour<15 or (now.hour==15 and now.minute<=30)
         if wd and ao and bc: run_full_scan()
         else: logger.info("Outside market hours")
         time.sleep(SCAN_INTERVAL)
@@ -547,18 +403,17 @@ def api_stock_detail(symbol):
 def serve_frontend():
     return send_from_directory(".", "index.html")
 
-# ── Watchlist (stored server-side in memory, persists while app runs) ──
-watchlists = {}  # { "list_name": ["SYMBOL-EQ", ...] }
+# ── Watchlists ──
+watchlists = {}
 
 @app.route("/api/watchlists")
 def api_get_watchlists():
     return jsonify(watchlists)
 
-@app.route("/api/watchlists/<name>", methods=["PUT"])
+@app.route("/api/watchlists/<n>", methods=["PUT"])
 def api_create_watchlist(n):
-    if n not in watchlists:
-        watchlists[n] = []
-    return jsonify({"status": "created", "n": n})
+    if n not in watchlists: watchlists[n] = []
+    return jsonify({"status": "created", "name": n})
 
 @app.route("/api/watchlists/<n>", methods=["DELETE"])
 def api_delete_watchlist(n):
@@ -568,17 +423,14 @@ def api_delete_watchlist(n):
 @app.route("/api/watchlists/<n>/add", methods=["POST"])
 def api_watchlist_add(n):
     symbol = request.json.get("symbol", "")
-    if n not in watchlists:
-        watchlists[n] = []
-    if symbol and symbol not in watchlists[n]:
-        watchlists[n].append(symbol)
+    if n not in watchlists: watchlists[n] = []
+    if symbol and symbol not in watchlists[n]: watchlists[n].append(symbol)
     return jsonify({"status": "added", "watchlist": watchlists[n]})
 
 @app.route("/api/watchlists/<n>/remove", methods=["POST"])
 def api_watchlist_remove(n):
     symbol = request.json.get("symbol", "")
-    if n in watchlists and symbol in watchlists[n]:
-        watchlists[n].remove(symbol)
+    if n in watchlists and symbol in watchlists[n]: watchlists[n].remove(symbol)
     return jsonify({"status": "removed", "watchlist": watchlists.get(n, [])})
 
 # ═══════════════════════════════════════════════════════════════

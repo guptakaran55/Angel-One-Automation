@@ -1,10 +1,10 @@
 """
 Index constituent lists for Indian stock markets.
-Each stock is mapped to its index memberships.
-Last updated: Feb 2026. These are revised semi-annually by NSE/BSE.
+Known index members are hardcoded. All other NSE equities are scanned too
+and auto-classified as "OTHER NSE".
+Last updated: Feb 2026.
 """
 
-# ── NIFTY 50 ──
 NIFTY_50 = [
     "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK",
     "BAJAJ-AUTO","BAJFINANCE","BAJAJFINSV","BEL","BPCL",
@@ -18,7 +18,6 @@ NIFTY_50 = [
     "TECHM","TITAN","TRENT","ULTRACEMCO","WIPRO",
 ]
 
-# ── NIFTY NEXT 50 (these + NIFTY 50 = NIFTY 100) ──
 NIFTY_NEXT_50 = [
     "ABB","ABBOTINDIA","AMBUJACEM","BAJAJHLDNG","BANKBARODA",
     "BERGEPAINT","BOSCHLTD","CANBK","CHOLAFIN","COLPAL",
@@ -32,8 +31,42 @@ NIFTY_NEXT_50 = [
     "YESBANK","ZOMATO","ZYDUSLIFE","IDEA","MOTHERSON",
 ]
 
-# ── BSE 100 / SENSEX 100 (S&P BSE 100) ──
-# Largely overlaps with NIFTY 100, with some BSE-specific additions
+NIFTY_MIDCAP_100 = [
+    "ADANIGREEN","ADANIPOWER","ADANIENERGY","ADANITOTAL",
+    "MUTHOOTFIN","CUMMINSIND","POLYCAB","PERSISTENT","SUZLON",
+    "FEDERALBNK","INDUSTOWER","INDIANB","BSE","ASHOKLEY",
+    "BHEL","PBFINTECH","SWIGGY","HDFCAMC","COFORGE",
+    "AUBANK","IDFCFIRSTB","OBEROIRLTY","AUROPHARMA","OFSS",
+    "PIIND","ESCORTS","PAGEIND","MPHASIS","TATAELXSI",
+    "KPITTECH","VOLTAS","LODHA","DELHIVERY","MRF",
+    "SUNDARMFIN","LICHSGFIN","MFSL","NATIONALUM","HUDCO",
+    "BANKINDIA","ALKEM","HINDCOPPER","SAIL","PETRONET",
+    "DIXON","TATAPOWER","IREDA","GUJGASLTD","SJVN",
+    "NMDC","BALKRISIND","SUPREMEIND","APLAPOLLO","PHOENIXLTD",
+    "ASTRAL","JUBLFOOD","MANAPPURAM","DEEPAKNTR","CROMPTON",
+    "SONACOMS","ACC","BIOCON","KALYANKJIL","METROBRAND",
+    "BSOFT","PATANJALI","JSL","THERMAX","SYNGENE",
+    "HONAUT","EXIDEIND","KEI","CGPOWER","PRESTIGE",
+    "IPCALAB","CONCOR","BANDHANBNK","FORTIS","RBLBANK",
+    "IDBIBANK","GMRAIRPORT","INDIAMART","ANGELONE","GODREJPROP",
+    "ZEEL","LALPATHLAB","AJANTPHARM","TATACOMM","BDL",
+    "COCHINSHIP","TATACHEM","ABCAPITAL","POONAWALLA","CAMS",
+    "CLEAN","KAYNES","SUNTV","NAVINFLUOR","RVNL","TIINDIA",
+]
+
+NIFTY_MIDCAP_150_EXTRA = [
+    "ENDURANCE","SOLARINDS","NAUKRI","CENTRALBK","NIACL",
+    "EMAMILTD","GLAXO","AIAENG","IIFL","RAJESHEXPO",
+    "ABFRL","BLUESTARLT","KANSAINER","SUNDRMFAST","EIDPARRY",
+    "MAHABANK","LINDEINDIA","BRIGADE","GRINDWELL","SCHAEFFLER",
+    "APTUS","JKCEMENT","ASTRAZEN","CYIENT","NUVOCO",
+    "AAVAS","HAPPSTMNDS","RATNAMANI","FIVESTAR","GPPL",
+    "SUMICHEM","TRIVENI","ZENSARTECH","POLYMED","FINCABLES",
+    "MAHSEAMLESS","SAPPHIRE","WHIRLPOOL","DATAPATTNS","FINEORG",
+    "ISEC","LATENTVIEW","RENUKA","ROUTE","SWANENERGY",
+    "TIMKEN","PGHH",
+]
+
 BSE_100 = NIFTY_50 + [
     "ABB","ABBOTINDIA","AMBUJACEM","BANKBARODA","BERGEPAINT",
     "BOSCHLTD","CHOLAFIN","COLPAL","DABUR","DIVISLAB",
@@ -47,51 +80,33 @@ BSE_100 = NIFTY_50 + [
     "MOTHERSON","UNITDSPR","VBL","IDEA","UNIONBANK",
 ]
 
-# ── NIFTY MIDCAP 150 (ranked 101-250 by market cap in NIFTY 500) ──
-NIFTY_MIDCAP_150 = [
-    "MUTHOOTFIN","CUMMINSIND","POLYCAB","PERSISTENT","SUZLON",
-    "FEDERALBNK","INDUSTOWER","INDIANB","IDBIBANK","GMRAIRPORT",
-    "BSE","ASHOKLEY","BHEL","PBFINTECH","SWIGGY",
-    "HDFCAMC","COFORGE","AUBANK","IDFCFIRSTB","OBEROIRLTY",
-    "AUROPHARMA","OFSS","PIIND","ESCORTS","PAGEIND",
-    "MPHASIS","TATAELXSI","KPITTECH","SOLARINDS","VOLTAS",
-    "NAUKRI","LODHA","DELHIVERY","MRF","SUNDARMFIN",
-    "LICHSGFIN","CENTRALBK","MFSL","NATIONALUM","HUDCO",
-    "BANKINDIA","ALKEM","HINDCOPPER","SAIL","PETRONET",
-    "DIXON","TATAPOWER","IREDA","GUJGASLTD","SJVN",
-    "NMDC","BALKRISIND","ENDURANCE","SUPREMEIND","APLAPOLLO",
-    "PHOENIXLTD","NIACL","ASTRAL","EMAMILTD","GLAXO",
-    "JUBLFOOD","MANAPPURAM","AIAENG","DEEPAKNTR","CROMPTON",
-    "SONACOMS","ACC","BIOCON","KALYANKJIL","METROBRAND",
-    "BSOFT","PATANJALI","JSL","THERMAX","IIFL",
-    "SYNGENE","HONAUT","EXIDEIND","KEI","CGPOWER",
-    "RAJESHEXPO","PRESTIGE","IPCALAB","CONCOR","BANDHANBNK",
-    "PGHH","ABFRL","BLUESTARLT","FORTIS","RBLBANK",
-    "KANSAINER","SUNDRMFAST","EIDPARRY","INDIAMART","ANGELONE",
-    "MAHABANK","LINDEINDIA","GODREJPROP","BRIGADE","ZEEL",
-    "GRINDWELL","LALPATHLAB","SCHAEFFLER","AJANTPHARM","TATACOMM",
-    "APTUS","RVNL","TIINDIA","BDL","COCHINSHIP",
-    "JKCEMENT","ASTRAZEN","CYIENT","TRENT","NHPC",
-    "TATACHEM","ABCAPITAL","NUVOCO","AAVAS","HAPPSTMNDS",
-    "CLEAN","KAYNES","POONAWALLA","RATNAMANI","CAMS",
-    "FIVESTAR","GPPL","SUMICHEM","TRIVENI","ZENSARTECH",
-    "POLYMED","FINCABLES","MAHSEAMLESS","SAPPHIRE","SUNTV",
-    "WHIRLPOOL","DATAPATTNS","FINEORG","ISEC","LATENTVIEW",
-    "NAVINFLUOR","RENUKA","ROUTE","SWANENERGY","TIMKEN",
-]
+NIFTY_MIDCAP_150 = NIFTY_MIDCAP_100 + NIFTY_MIDCAP_150_EXTRA
 
-# ── Build index membership map ──
+# All known index members combined
+ALL_KNOWN = set(NIFTY_50 + NIFTY_NEXT_50 + BSE_100 + NIFTY_MIDCAP_150 + NIFTY_MIDCAP_100)
+
+# ── Index categories (order matters for display) ──
+INDEX_NAMES = ["NIFTY 50", "NIFTY 100", "NIFTY 200", "BSE 100", "MIDCAP 150", "OTHER NSE"]
+
+
 def build_index_map():
-    """Returns a dict: symbol -> list of index names it belongs to."""
+    """Returns dict: symbol -> list of index names."""
     index_map = {}
 
     for sym in NIFTY_50:
         index_map.setdefault(sym, []).append("NIFTY 50")
 
-    for sym in NIFTY_50 + NIFTY_NEXT_50:
+    nifty_100 = set(NIFTY_50 + NIFTY_NEXT_50)
+    for sym in nifty_100:
         index_map.setdefault(sym, [])
         if "NIFTY 100" not in index_map[sym]:
             index_map[sym].append("NIFTY 100")
+
+    nifty_200 = nifty_100 | set(NIFTY_MIDCAP_100)
+    for sym in nifty_200:
+        index_map.setdefault(sym, [])
+        if "NIFTY 200" not in index_map[sym]:
+            index_map[sym].append("NIFTY 200")
 
     for sym in BSE_100:
         index_map.setdefault(sym, [])
@@ -106,18 +121,9 @@ def build_index_map():
     return index_map
 
 
-def get_all_symbols():
-    """Get the combined unique set of all symbols across all indices."""
-    all_syms = set(NIFTY_50 + NIFTY_NEXT_50 + BSE_100 + NIFTY_MIDCAP_150)
-    return all_syms
-
-
-# Quick stats
-if __name__ == "__main__":
-    idx = build_index_map()
-    all_s = get_all_symbols()
-    print(f"NIFTY 50:     {len(NIFTY_50)} stocks")
-    print(f"NIFTY 100:    {len(set(NIFTY_50 + NIFTY_NEXT_50))} stocks")
-    print(f"BSE 100:      {len(set(BSE_100))} stocks")
-    print(f"MIDCAP 150:   {len(NIFTY_MIDCAP_150)} stocks")
-    print(f"Total unique: {len(all_s)} stocks to scan")
+def get_indices_for(symbol, index_map):
+    """Get index tags for a symbol. If not in any known index, tag as OTHER NSE."""
+    tags = index_map.get(symbol, [])
+    if not tags:
+        return ["OTHER NSE"]
+    return tags
