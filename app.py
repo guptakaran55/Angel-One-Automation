@@ -449,5 +449,5 @@ def initialize():
         return False
     fetch_instrument_list()
     threading.Thread(target=scheduler, daemon=True).start()
-    threading.Thread(target=run_full_scan, daemon=True).start()
+    #threading.Thread(target=run_full_scan, daemon=True).start()
     return True
