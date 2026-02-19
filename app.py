@@ -11,7 +11,7 @@ import numpy as np, pandas as pd, pyotp, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from SmartApi import SmartConnect
-from index_data import build_index_map, get_indices_for, INDEX_NAMES
+from index_data import build_index_map, get_indices_for, INDEX_NAMES, ALL_KNOWN
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,13 +25,22 @@ PASSWORD   = os.getenv("ANGEL_PASSWORD", "")
 TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
+# SCAN_MODE: "top500" (fast ~5min) or "full" (all NSE ~15min)
+scan_mode = os.getenv("SCAN_MODE", "top500").lower()
+
 INDEX_MAP = build_index_map()
 
 smart_api = None
 refresh_token = None
-instrument_list = []
+instrument_list = []       # full list from Angel One
+scan_instrument_list = []  # filtered list based on scan_mode
 is_scanning = False
 credentials_ok = False
+last_login_attempt = 0     # timestamp of last login attempt
+login_backoff = 1          # exponential backoff seconds
+
+# Live scan progress (read by frontend)
+scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "rate_limited": False}
 
 scan_results = {
     "last_scan": None, "status": "not_started", "total_scanned": 0,
@@ -53,7 +62,7 @@ def check_credentials():
     return missing
 
 def create_session():
-    global smart_api, refresh_token, credentials_ok
+    global smart_api, refresh_token, credentials_ok, last_login_attempt, login_backoff
     try:
         smart_api = SmartConnect(api_key=API_KEY)
         totp = pyotp.TOTP(TOTP_TOKEN).now()
@@ -64,6 +73,7 @@ def create_session():
             return False
         refresh_token = data["data"]["refreshToken"]
         credentials_ok = True
+        login_backoff = 1  # reset backoff on success
         logger.info("Logged in to Angel One")
         return True
     except Exception as e:
@@ -72,37 +82,73 @@ def create_session():
         return False
 
 def ensure_session():
-    if smart_api is None: return create_session()
+    """Re-login if needed, with exponential backoff to avoid rate limit spiral."""
+    global last_login_attempt, login_backoff, scan_progress
+    if smart_api is None:
+        return create_session()
     try:
         smart_api.getProfile(refresh_token)
         return True
     except:
-        return create_session()
+        # Check cooldown — don't spam login attempts
+        now = time.time()
+        if now - last_login_attempt < login_backoff:
+            return False  # still cooling down
+        last_login_attempt = now
+        result = create_session()
+        if not result:
+            # Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 60s
+            login_backoff = min(login_backoff * 2, 60)
+            scan_progress["rate_limited"] = True
+            logger.warning(f"Login failed, backing off {login_backoff}s")
+        else:
+            login_backoff = 1
+            scan_progress["rate_limited"] = False
+        return result
 
 # ═══════════════════════════════════════════════════════════════
 # INSTRUMENTS — ALL NSE EQUITIES
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_instrument_list():
-    """Download ALL NSE equities from Angel One. No filtering."""
-    global instrument_list
+    """Download ALL NSE equities, then apply scan_mode filter."""
+    global instrument_list, scan_instrument_list
     try:
         url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        logger.info("Downloading full instrument list...")
+        logger.info("Downloading instrument list...")
         resp = requests.get(url, timeout=120)
         all_inst = resp.json()
 
-        # Keep ALL NSE equities (symbols ending in -EQ)
+        # Full NSE equity list (always kept for switching modes without re-download)
         instrument_list = [
             i for i in all_inst
             if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")
         ]
+        logger.info(f"Total NSE equities: {len(instrument_list)}")
 
-        logger.info(f"Loaded {len(instrument_list)} NSE equities (ALL stocks)")
+        apply_scan_mode()
         return True
     except Exception as e:
         logger.error(f"Instrument fetch failed: {e}")
         return False
+
+
+def apply_scan_mode():
+    """Filter instrument_list based on scan_mode. No re-download needed."""
+    global scan_instrument_list
+    if scan_mode == "full":
+        scan_instrument_list = instrument_list
+        logger.info(f"Scan mode: FULL — {len(scan_instrument_list)} stocks")
+    else:
+        # Top 500: use all known index members (~300) + next ~200 by sorting
+        # Angel One's instrument list is roughly ordered by market cap
+        known = ALL_KNOWN
+        known_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") in known]
+        other_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") not in known]
+        # Take first ~200 unknowns (roughly next by market cap in Angel's list)
+        extra = other_list[:max(0, 500 - len(known_list))]
+        scan_instrument_list = known_list + extra
+        logger.info(f"Scan mode: TOP500 — {len(scan_instrument_list)} stocks ({len(known_list)} indexed + {len(extra)} other)")
 
 # ═══════════════════════════════════════════════════════════════
 # DATA FETCH
@@ -222,8 +268,40 @@ def analyze_stock(df):
 
     cbm,cbu,cbl = bm.iloc[-1],bu.iloc[-1],bl.iloc[-1]
     cm,cms,cmh = ml.iloc[-1],ms.iloc[-1],mh.iloc[-1]
+
+    # ── MACD Derivatives (d/dt and d²/dt²) ──
+    # First derivative: slope of MACD line (velocity of momentum)
     cm_prev = ml.iloc[-2] if len(ml)>=2 else cm
-    macd_slope = float(cm-cm_prev) if ok(cm) and ok(cm_prev) else 0
+    cm_prev2 = ml.iloc[-3] if len(ml)>=3 else cm_prev
+    macd_slope = float(cm - cm_prev) if ok(cm) and ok(cm_prev) else 0      # d(MACD)/dt
+    macd_slope_prev = float(cm_prev - cm_prev2) if ok(cm_prev) and ok(cm_prev2) else 0
+    # Second derivative: rate of change of slope (acceleration of momentum)
+    macd_accel = macd_slope - macd_slope_prev  # d²(MACD)/dt²
+
+    # ── Momentum Phase Detection ──
+    # Phase 1 (EARLY BUY):  slope < 0 but accel > 0  → decline slowing, about to flip
+    # Phase 2 (BUY CONFIRM): slope crosses 0 from below (was neg, now pos)
+    # Phase 3 (EARLY SELL):  slope > 0 but accel < 0  → rise slowing, about to flip
+    # Phase 4 (SELL CONFIRM): slope crosses 0 from above (was pos, now neg)
+    slope_cross_up = bool(macd_slope > 0 and macd_slope_prev <= 0)   # just flipped positive
+    slope_cross_dn = bool(macd_slope < 0 and macd_slope_prev >= 0)   # just flipped negative
+    early_buy = bool(macd_slope < 0 and macd_accel > 0)              # decline decelerating
+    early_sell = bool(macd_slope > 0 and macd_accel < 0)             # rise decelerating
+
+    if slope_cross_up:
+        macd_phase = "BUY FLIP"
+    elif early_buy:
+        macd_phase = "EARLY BUY"
+    elif slope_cross_dn:
+        macd_phase = "SELL FLIP"
+    elif early_sell:
+        macd_phase = "EARLY SELL"
+    elif macd_slope > 0 and macd_accel >= 0:
+        macd_phase = "BULLISH"
+    elif macd_slope < 0 and macd_accel <= 0:
+        macd_phase = "BEARISH"
+    else:
+        macd_phase = "NEUTRAL"
     co = ov.iloc[-1]
     co5 = ov.iloc[-5] if len(ov)>=5 else ov.iloc[0]
     co20 = ov.iloc[-20] if len(ov)>=20 else ov.iloc[0]
@@ -236,35 +314,77 @@ def analyze_stock(df):
     reward = round(resistance-price,2) if resistance else 0
     rr_ratio = round(reward/risk,2) if risk>0 else 0
 
-    # ── BUY SCORE (100pt) ──
+    # MACD zero-cross detection: MACD just turned positive from ≤0
+    cm_prev_val = ml.iloc[-2] if len(ml) >= 2 else 0
+    macd_zero_cross_up = bool(ok(cm) and cm > 0 and cm < 0.15 and ok(cm_prev_val) and cm_prev_val <= 0)
+
+    # Mini MACD curve (last 20 values, normalised for sparkline)
+    macd_curve = []
+    n_curve = min(20, len(ml))
+    if n_curve > 2:
+        raw = [float(ml.iloc[-n_curve + j]) for j in range(n_curve) if ok(ml.iloc[-n_curve + j])]
+        if raw:
+            mn, mx = min(raw), max(raw)
+            rng = mx - mn if mx != mn else 1
+            macd_curve = [round((v - mn) / rng, 3) for v in raw]
+
+    # ══════════════════════════════════════════════════════════
+    # BUY SCORE — Revised Weights (max ~110 with all bonuses)
+    # ══════════════════════════════════════════════════════════
     buy_score = 0; buy_breakdown = {}
 
-    sma_p = bool(price>s200) if ok(s200) else False
-    sma_pts = 30 if sma_p else 0; buy_score += sma_pts
-    buy_breakdown["sma200"] = {"pass":sma_p,"pts":sma_pts,"max":30,"val":sf(s200),"desc":"Close > SMA(200)"}
+    # 1. SMA(200) — 25 pts
+    sma_p = bool(price > s200) if ok(s200) else False
+    sma_pts = 25 if sma_p else 0; buy_score += sma_pts
+    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": 25,
+                                "val": sf(s200), "desc": "Close > SMA(200)"}
 
-    rsi_p = bool(30<r14<=45) if ok(r14) else False
-    rsi_deep = bool(r14<=35) if ok(r14) else False
-    rsi_pts = (20 + (5 if rsi_deep else 0)) if rsi_p else 0; buy_score += rsi_pts
-    buy_breakdown["rsi"] = {"pass":rsi_p,"pts":rsi_pts,"max":25,"val":sf(r14),"desc":"RSI 30-45"+(" +bonus ≤35" if rsi_deep else "")}
+    # 2. MACD INFLECTION — 30 pts (★ highest weight)
+    #    Best case: MACD just crossed zero up (0 < MACD < 0.15) AND d²/dt² > 0
+    #    Good case: slope just flipped positive
+    #    Early case: decline decelerating (d²/dt² > 0 while d/dt < 0)
+    macd_inf_pts = 0
+    macd_inf_desc = ""
+    if macd_zero_cross_up and macd_accel > 0:
+        macd_inf_pts = 30
+        macd_inf_desc = "MACD crossed 0↑ + accel ↑ (PRIME ENTRY)"
+    elif slope_cross_up:
+        macd_inf_pts = 20
+        macd_inf_desc = "Slope flipped positive ↑"
+    elif early_buy:
+        macd_inf_pts = 10
+        macd_inf_desc = "Decline slowing (d²>0, d<0)"
+    macd_inf_pass = macd_inf_pts > 0
+    buy_score += macd_inf_pts
+    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts, "max": 30,
+                                         "val": sf(macd_slope, 4), "desc": macd_inf_desc or "No inflection detected"}
 
+    # 3. RSI(14) — 15 pts + 5 bonus
+    rsi_p = bool(30 < r14 <= 45) if ok(r14) else False
+    rsi_deep = bool(r14 <= 35) if ok(r14) else False
+    rsi_pts = (15 + (5 if rsi_deep else 0)) if rsi_p else 0; buy_score += rsi_pts
+    buy_breakdown["rsi"] = {"pass": rsi_p, "pts": rsi_pts, "max": 20,
+                             "val": sf(r14), "desc": "RSI 30-45" + (" +bonus ≤35" if rsi_deep else "")}
+
+    # 4. Bollinger Bands — 10 pts + 5 bonus
     bb_p = bool(abm or tlb) if ok(cbm) else False
-    bb_pts = (20 + (5 if tlb else 0)) if bb_p else 0; buy_score += bb_pts
-    buy_breakdown["bollinger"] = {"pass":bb_p,"pts":bb_pts,"max":25,"val":sf(cbm),"desc":"At/below mid BB"+(" +touched lower" if tlb else "")}
+    bb_pts = (10 + (5 if tlb else 0)) if bb_p else 0; buy_score += bb_pts
+    buy_breakdown["bollinger"] = {"pass": bb_p, "pts": bb_pts, "max": 15,
+                                   "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
 
-    macd_p = bool(cm>cms and cmh>0) if ok(cm) and ok(cms) else False
-    macd_pts = 15 if macd_p else 0; buy_score += macd_pts
-    buy_breakdown["macd"] = {"pass":macd_p,"pts":macd_pts,"max":15,"val":sf(cm,4),"desc":"MACD > Signal, Hist > 0"}
+    # 5. ADX(14) — 10 pts + 5 bonus
+    adx_p = bool(curr_adx > 25); adx_str = bool(curr_adx > 30)
+    adx_pts = (10 + (5 if adx_str else 0)) if adx_p else 0; buy_score += adx_pts
+    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 15,
+                             "val": sf(curr_adx), "desc": "ADX > 25" + (" +bonus >30" if adx_str else "")}
 
-    obv_p = bool(co>co5 and co>co20)
-    obv_pts = 10 if obv_p else 0; buy_score += obv_pts
-    buy_breakdown["obv"] = {"pass":obv_p,"pts":obv_pts,"max":10,"val":sf(co,0),"desc":"OBV rising vs 5d & 20d"}
+    # 6. OBV — 5 pts
+    obv_p = bool(co > co5 and co > co20)
+    obv_pts = 5 if obv_p else 0; buy_score += obv_pts
+    buy_breakdown["obv"] = {"pass": obv_p, "pts": obv_pts, "max": 5,
+                             "val": sf(co, 0), "desc": "OBV rising vs 5d & 20d"}
 
-    adx_p = bool(curr_adx>25); adx_str = bool(curr_adx>30)
-    adx_pts = (15 + (5 if adx_str else 0)) if adx_p else 0; buy_score += adx_pts
-    buy_breakdown["adx"] = {"pass":adx_p,"pts":adx_pts,"max":20,"val":sf(curr_adx),"desc":"ADX > 25"+(" +bonus >30" if adx_str else "")}
-
-    buy_signal = "STRONG BUY" if buy_score>=80 else ("MODERATE BUY" if buy_score>=70 else "NO SIGNAL")
+    buy_signal = "STRONG BUY" if buy_score >= 75 else ("MODERATE BUY" if buy_score >= 60 else "NO SIGNAL")
 
     sell_c = {
         "trend_break": bool(price<s200) if ok(s200) else False,
@@ -272,6 +392,7 @@ def analyze_stock(df):
         "volatility_extreme": bool(price>=cbu) if ok(cbu) else False,
         "momentum_fade": bool(cm<cms and cmh<0) if ok(cm) and ok(cms) else False,
         "volume_weakness": bool(co<co5),
+        "macd_slope_flip": slope_cross_dn,
     }
     sell_count = sum(sell_c.values())
 
@@ -279,11 +400,13 @@ def analyze_stock(df):
         "price":sf(price),"sma200":sf(s200),"rsi":sf(r14),
         "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
         "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
-        "macd_slope":round(macd_slope,4),"obv":sf(co,0),"adx":sf(curr_adx),
+        "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),
+        "macd_phase":macd_phase,"macd_curve":macd_curve,
+        "obv":sf(co,0),"adx":sf(curr_adx),
         "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
-        "sell_conditions":sell_c,"sell_count":f"{sell_count}/5","sell_pct":sell_count/5*100,
-        "is_buy":buy_score>=80,"is_moderate_buy":buy_score>=70,"is_sell":sell_count>=3,
+        "sell_conditions":sell_c,"sell_count":f"{sell_count}/6","sell_pct":sell_count/6*100,
+        "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,"is_sell":sell_count>=3,
     }
 
 # ═══════════════════════════════════════════════════════════════
@@ -291,7 +414,7 @@ def analyze_stock(df):
 # ═══════════════════════════════════════════════════════════════
 
 def run_full_scan():
-    global scan_results, is_scanning
+    global scan_results, is_scanning, scan_progress
     if not credentials_ok:
         logger.error("Cannot scan — not logged in")
         return
@@ -299,42 +422,74 @@ def run_full_scan():
     is_scanning = True
     scan_results["status"] = "scanning"
 
-    total = len(instrument_list)
-    logger.info(f"Starting FULL NSE scan: {total} stocks...")
+    total = len(scan_instrument_list)
+    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "rate_limited": False}
+    logger.info(f"Starting scan ({scan_mode.upper()}): {total} stocks...")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
 
     portfolio = fetch_portfolio()
     ptokens = {h["token"] for h in portfolio}
     idx_counts = {n: 0 for n in INDEX_NAMES}
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 15  # abort if 15 in a row (likely rate limited)
 
-    for i, inst in enumerate(instrument_list):
+    for i, inst in enumerate(scan_instrument_list):
         sym, token = inst["symbol"], inst["token"]
         name = inst.get("name", sym.replace("-EQ",""))
         clean = sym.replace("-EQ","")
+
+        # Update live progress
+        scan_progress["current"] = i + 1
+
+        # Abort if too many consecutive errors (rate limit or session dead)
+        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+            logger.error(f"Aborting scan: {consecutive_errors} consecutive errors. Rate limited?")
+            scan_progress["rate_limited"] = True
+            break
+
         try:
             df = fetch_candle_data(token)
             if df is None or len(df) < 200:
                 errs.append({"symbol": sym, "error": "< 200 daily candles"})
+                scan_progress["errors"] = len(errs)
+                consecutive_errors += 1
                 continue
             a = analyze_stock(df)
-            if a is None: continue
+            if a is None:
+                consecutive_errors += 1
+                continue
 
-            # Tag with known indices or OTHER NSE
+            # Success — reset consecutive error counter
+            consecutive_errors = 0
+
             indices = get_indices_for(clean, INDEX_MAP)
-
             stock = {"symbol": sym, "name": name, "token": token,
                      "in_portfolio": token in ptokens, "indices": indices, **a}
             all_s.append(stock)
+            scan_progress["ok"] = len(all_s)
 
             for ix in indices:
                 if ix in idx_counts: idx_counts[ix] += 1
 
             if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
             if a["is_sell"] and token in ptokens: sells.append(stock)
-            time.sleep(0.35)
+
+            # Update scan_results live so frontend can show partial results
+            if len(all_s) % 10 == 0:
+                scan_results.update({
+                    "total_scanned": len(all_s),
+                    "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+                    "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
+                    "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+                    "index_counts": idx_counts.copy(),
+                })
+
+            time.sleep(0.5)  # 2 req/s — safe margin under 3/s limit
         except Exception as e:
             errs.append({"symbol": sym, "error": str(e)})
+            scan_progress["errors"] = len(errs)
+            consecutive_errors += 1
 
         if (i+1) % 50 == 0:
             elapsed_so_far = time.time() - t0
@@ -376,22 +531,60 @@ def scheduler():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify({"connected": credentials_ok, "instruments": len(instrument_list),
+    return jsonify({"connected": credentials_ok,
+                    "instruments_total": len(instrument_list),
+                    "instruments_scan": len(scan_instrument_list),
+                    "scan_mode": scan_mode,
                     "last_scan": scan_results.get("last_scan"),
                     "scan_status": scan_results.get("status"), "is_scanning": is_scanning,
                     "index_counts": scan_results.get("index_counts", {}),
                     "missing": check_credentials()})
 
+@app.route("/api/scan_mode", methods=["POST"])
+def api_set_scan_mode():
+    global scan_mode
+    mode = request.json.get("mode", "top500").lower()
+    if mode not in ("top500", "full"):
+        return jsonify({"error": "Invalid mode. Use 'top500' or 'full'"}), 400
+    scan_mode = mode
+    apply_scan_mode()
+    return jsonify({"scan_mode": scan_mode, "instruments_scan": len(scan_instrument_list)})
+
+@app.route("/api/reconnect", methods=["POST"])
+def api_reconnect():
+    """Try to re-login and re-download instruments. Called from frontend."""
+    global credentials_ok
+    ok = create_session()
+    if ok:
+        if len(instrument_list) == 0:
+            fetch_instrument_list()
+        return jsonify({"status": "connected", "instruments_scan": len(scan_instrument_list)})
+    return jsonify({"error": "Login failed. Check credentials or try again in a minute."}), 500
+
 @app.route("/api/scan", methods=["POST"])
 def api_trigger_scan():
-    if not credentials_ok: return jsonify({"error": "Not connected"}), 401
-    if is_scanning: return jsonify({"status": "already_scanning"}), 409
+    global credentials_ok
+    # If not connected, try to reconnect first
+    if not credentials_ok:
+        if not create_session():
+            return jsonify({"error": "Not connected to Angel One. Click Reconnect."}), 401
+    # If instruments not loaded yet (startup failed), load them now
+    if len(scan_instrument_list) == 0:
+        fetch_instrument_list()
+    if len(scan_instrument_list) == 0:
+        return jsonify({"error": "No instruments loaded. Try reconnecting."}), 500
+    if is_scanning:
+        return jsonify({"status": "already_scanning"}), 409
     threading.Thread(target=run_full_scan, daemon=True).start()
-    return jsonify({"status": "scan_started"})
+    return jsonify({"status": "scan_started", "instruments": len(scan_instrument_list)})
 
 @app.route("/api/results")
 def api_results():
     return jsonify(scan_results)
+
+@app.route("/api/progress")
+def api_progress():
+    return jsonify(scan_progress)
 
 @app.route("/api/stock/<symbol>")
 def api_stock_detail(symbol):
@@ -441,13 +634,16 @@ def initialize():
     global credentials_ok
     missing = check_credentials()
     if missing:
-        logger.error(f"Missing: {', '.join(missing)}")
+        logger.error(f"Missing env vars: {', '.join(missing)}")
         credentials_ok = False
         return False
-    if not create_session():
-        logger.error("Login failed!")
-        return False
-    fetch_instrument_list()
+
+    # Try to login — if it fails, server still starts (user can reconnect from browser)
+    if create_session():
+        fetch_instrument_list()
+    else:
+        logger.warning("Initial login failed — server starting anyway. Use Reconnect button in browser.")
+
     threading.Thread(target=scheduler, daemon=True).start()
-    #threading.Thread(target=run_full_scan, daemon=True).start()
+    logger.info(f"Ready. Scan mode: {scan_mode.upper()} ({len(scan_instrument_list)} stocks).")
     return True

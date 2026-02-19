@@ -138,13 +138,34 @@ function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
 function ITags({indices}){if(!indices||!indices.length)return null;return<>{indices.map(i=><span key={i}className={`itag ${ITAG_CLS[i]||'itag-other'}`}>{i}</span>)}</>}
 function SellDots({c}){return<div className="ds">{Object.keys(c).map(k=><div key={k}className={`d ${c[k]?'p':'f'}`}title={k}/>)}</div>}
 function RR({ratio}){if(!ratio||ratio<=0)return<span className="rr rr-bad">—</span>;const cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';return<span className={`rr ${cl}`}>{ratio.toFixed(1)}:1</span>}
-function MACDSlope({slope}){if(slope==null)return<span className="macd-slope slope-flat">—</span>;const a=Math.abs(slope);if(a<0.01)return<span className="macd-slope slope-flat">→ 0.00</span>;if(slope>0)return<span className="macd-slope slope-up">↗ +{slope.toFixed(2)}</span>;return<span className="macd-slope slope-dn">↘ {slope.toFixed(2)}</span>}
+function MACDSlope({slope,phase,curve}){
+  if(slope==null)return<span className="macd-slope slope-flat">—</span>;
+  const phaseColors={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
+  const col=phaseColors[phase]||"var(--t3)";
+  let pathD='';
+  if(curve&&curve.length>2){
+    const w=48,h=18;
+    const pts=curve.map((v,i)=>`${(i/(curve.length-1))*w},${h-v*h}`);
+    pathD=`M${pts.join(' L')}`;
+  }
+  return<div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+    {pathD&&<svg width="48"height="18"viewBox="0 0 48 18"style={{flexShrink:0}}>
+      <line x1="0"y1="9"x2="48"y2="9"stroke="var(--bd2)"strokeWidth="0.5"strokeDasharray="2,2"/>
+      <path d={pathD}fill="none"stroke={col}strokeWidth="1.5"strokeLinecap="round"strokeLinejoin="round"/>
+      <circle cx={48}cy={18-(curve[curve.length-1]||0)*18}r="2"fill={col}/>
+    </svg>}
+    <div style={{display:'flex',flexDirection:'column',gap:'0px'}}>
+      {phase&&<span style={{fontSize:'7px',fontWeight:700,color:col,letterSpacing:'.3px',lineHeight:'1.2'}}>{phase}</span>}
+      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:col}}>{slope>0?'+':''}{slope.toFixed(2)}</span>
+    </div>
+  </div>
+}
 
 function Modal({s,onClose,watchlists,onAddToWL}){
   if(!s)return null;
   const bb=s.buy_breakdown||{};const sc=s.sell_conditions||{};
-  const indicators=["sma200","rsi","bollinger","macd","obv","adx"];
-  const sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI ≥ 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'}];
+  const indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv"];
+  const sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI ≥ 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope ↓',d:'Slope flipped negative'}];
   const wlNames=Object.keys(watchlists);
   return<div className="mo"onClick={onClose}><div className="moc"onClick={e=>e.stopPropagation()}>
     <div className="moh"><div>
@@ -178,8 +199,43 @@ function Modal({s,onClose,watchlists,onAddToWL}){
         <div className="sr-item"><div className="sr-label">Support</div><div className="sr-val"style={{color:'var(--gn)'}}>₹{fmt(s.support)}</div></div>
         <div className="sr-item"><div className="sr-label">Resistance</div><div className="sr-val"style={{color:'var(--rd)'}}>₹{fmt(s.resistance)}</div></div>
         <div className="sr-item"><div className="sr-label">R:R</div><div className="sr-val"><RR ratio={s.rr_ratio}/></div></div>
-        <div className="sr-item"><div className="sr-label">MACD Slope</div><div className="sr-val"><MACDSlope slope={s.macd_slope}/></div></div>
       </div>
+      {/* MACD Momentum Phase */}
+      {(()=>{
+        const phC={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
+        const pc=phC[s.macd_phase]||"var(--t3)";
+        return<div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'6px'}}>MACD MOMENTUM ANALYSIS</div>
+          {(()=>{
+            const cv=s.macd_curve||[];
+            if(cv.length<3)return null;
+            const w=260,h=50;
+            const pts=cv.map((v,i)=>`${(i/(cv.length-1))*w},${h-v*h}`);
+            const pathD=`M${pts.join(' L')}`;
+            // Zero line position (find where normalised value maps to 0)
+            return<svg width="100%"height="50"viewBox={`0 0 ${w} ${h}`}preserveAspectRatio="none"style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.2)'}}>
+              <line x1="0"y1={h/2}x2={w}y2={h/2}stroke="var(--bd2)"strokeWidth="0.5"strokeDasharray="3,3"/>
+              <path d={pathD}fill="none"stroke={pc}strokeWidth="2"strokeLinecap="round"strokeLinejoin="round"/>
+              <circle cx={w}cy={h-(cv[cv.length-1]||0)*h}r="3"fill={pc}/>
+            </svg>
+          })()}
+          <div style={{display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
+            <div style={{padding:'6px 14px',background:pc+'18',borderRadius:'6px',border:`1px solid ${pc}40`}}>
+              <div style={{fontSize:'14px',fontWeight:800,color:pc}}>{s.macd_phase||'—'}</div>
+            </div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d(MACD)/dt</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_slope>0?'var(--gn)':s.macd_slope<0?'var(--rd)':'var(--t3)'}}>{s.macd_slope!=null?(s.macd_slope>0?'+':'')+s.macd_slope.toFixed(4):'—'}</div></div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d²(MACD)/dt²</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_accel>0?'var(--gn)':s.macd_accel<0?'var(--rd)':'var(--t3)'}}>{s.macd_accel!=null?(s.macd_accel>0?'+':'')+s.macd_accel.toFixed(4):'—'}</div></div>
+          </div>
+          <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
+            {s.macd_phase==='BUY FLIP'&&'Slope just crossed zero upward — momentum confirmed bullish'}
+            {s.macd_phase==='EARLY BUY'&&'Decline decelerating (d²>0 while d<0) — potential bottom forming'}
+            {s.macd_phase==='SELL FLIP'&&'Slope just crossed zero downward — momentum confirmed bearish'}
+            {s.macd_phase==='EARLY SELL'&&'Rise decelerating (d²<0 while d>0) — potential top forming'}
+            {s.macd_phase==='BULLISH'&&'Rising momentum with positive acceleration — strong uptrend'}
+            {s.macd_phase==='BEARISH'&&'Falling momentum with negative acceleration — strong downtrend'}
+          </div>
+        </div>
+      })()}
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
       <div className="ig"style={{marginBottom:'16px'}}>{indicators.map(k=>{const b=bb[k];if(!b)return null;const pct=b.max>0?(b.pts/b.max*100):0;
         return<div className="ic"key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={`ics ${b.pass?'p':'f'}`}>{b.pts}/{b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f"style={{width:`${pct}%`,background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
@@ -192,6 +248,7 @@ function Modal({s,onClose,watchlists,onAddToWL}){
 
 function App(){
   const[data,setData]=useState(null);const[status,setStatus]=useState(null);const[loading,setLoading]=useState(true);
+  const[progress,setProgress]=useState(null);
   const[idxFilter,setIdxFilter]=useState('all');
   const[tab,setTab]=useState('all');const[search,setSearch]=useState('');const[sortK,setSortK]=useState('buy_score');const[sortA,setSortA]=useState(false);const[sel,setSel]=useState(null);
   const[watchlists,setWatchlists]=useState(loadWL);
@@ -207,9 +264,33 @@ function App(){
 
   useEffect(()=>{if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
 
-  const fetchAll=useCallback(async()=>{try{const[r1,r2]=await Promise.all([fetch(`${API}/api/results`),fetch(`${API}/api/status`)]);setData(await r1.json());setStatus(await r2.json())}catch(e){}finally{setLoading(false)}},[]);
-  useEffect(()=>{fetchAll();const t=setInterval(fetchAll,15000);return()=>clearInterval(t)},[fetchAll]);
-  const triggerScan=async()=>{try{await fetch(`${API}/api/scan`,{method:'POST'});fetchAll()}catch(e){}};
+  const fetchAll=useCallback(async()=>{try{const[r1,r2,r3]=await Promise.all([fetch(`${API}/api/results`),fetch(`${API}/api/status`),fetch(`${API}/api/progress`)]);setData(await r1.json());setStatus(await r2.json());setProgress(await r3.json())}catch(e){}finally{setLoading(false)}},[]);
+  useEffect(()=>{fetchAll();const t=setInterval(fetchAll,isSc?5000:15000);return()=>clearInterval(t)},[fetchAll,isSc]);
+  const[scanError,setScanError]=useState(null);
+
+  const triggerScan=async()=>{
+    setScanError(null);
+    try{
+      const r=await fetch(`${API}/api/scan`,{method:'POST'});
+      const j=await r.json();
+      if(!r.ok){setScanError(j.error||'Scan failed');return}
+      fetchAll();
+    }catch(e){setScanError('Network error')}
+  };
+  const reconnect=async()=>{
+    setScanError(null);
+    try{
+      const r=await fetch(`${API}/api/reconnect`,{method:'POST'});
+      const j=await r.json();
+      if(!r.ok){setScanError(j.error||'Reconnect failed');return}
+      setScanError(null);
+      fetchAll();
+    }catch(e){setScanError('Network error')}
+  };
+  const toggleScanMode=async()=>{
+    const newMode=status?.scan_mode==='top500'?'full':'top500';
+    try{await fetch(`${API}/api/scan_mode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:newMode})});fetchAll()}catch(e){}
+  };
   const doSort=(k)=>{if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
 
   const stocks=useMemo(()=>{
@@ -242,22 +323,57 @@ function App(){
 
   const nT=data?.total_scanned||0;
   const isSc=data?.status==='scanning'||status?.is_scanning;
-  const instCount=status?.instruments||0;
+  const instCount=status?.instruments_scan||status?.instruments||0;
+  const curMode=status?.scan_mode||'top500';
 
   if(!data||!data.last_scan||nT===0){
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr"><div className="bdg"><div className={`dot ${isSc?'w':'on'}`}/>{isSc?'SCANNING':'READY'}</div>{!isSc&&<button className="btn btn-g"onClick={triggerScan}>▶ Scan</button>}</div></div></header>
-    <main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>{isSc?'⏳':'📊'}</div><h2>{isSc?'Scanning ALL NSE stocks...':'Ready'}</h2><p>{isSc?`Scanning ${instCount.toLocaleString()} NSE equities with daily candles. This takes ~12-15 minutes on first run.`:'Connected. Tap Scan or wait for auto-scan.'}</p>{isSc&&<><div className="sp"style={{margin:'16px auto'}}/><p style={{fontSize:'11px',color:'var(--t3)'}}>Results appear as they come in. Refresh to see progress.</p></>}</div></main></>;
+    const isConn=status?.connected;
+    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr">
+      <div className="bdg"><div className={`dot ${isSc?'w':isConn?'on':'off'}`}/>{isSc?'SCANNING':isConn?'READY':'OFFLINE'}</div>
+      {!isSc&&isConn&&<button className="btn btn-g"onClick={triggerScan}>▶ Scan</button>}
+      {!isConn&&<button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button>}
+    </div></div></header>
+    <main className="mn"><div className="setup">
+      <div style={{fontSize:'40px'}}>{isSc?'⏳':isConn?'📊':'🔌'}</div>
+      <h2>{isSc?'Scanning...':isConn?'Ready to scan':'Connection failed'}</h2>
+      {!isConn&&!isSc&&<p style={{color:'var(--rd)'}}>Could not connect to Angel One. This usually happens if the API timed out or you were rate-limited. Click Reconnect to try again.</p>}
+      {isConn&&!isSc&&<p>Choose scan mode, then tap Scan.</p>}
+      {scanError&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'380px'}}>{scanError}</div>}
+      {!isSc&&isConn&&<div style={{display:'flex',gap:'8px',justifyContent:'center',marginBottom:'16px'}}>
+        <button className={`btn ${curMode==='top500'?'btn-g':''}`}onClick={()=>{if(curMode!=='top500')toggleScanMode()}} style={{minWidth:'110px'}}>Top 500 <span style={{fontSize:'9px',opacity:.7}}>~5min</span></button>
+        <button className={`btn ${curMode==='full'?'btn-g':''}`}onClick={()=>{if(curMode!=='full')toggleScanMode()}} style={{minWidth:'110px'}}>All NSE <span style={{fontSize:'9px',opacity:.7}}>~15min</span></button>
+      </div>}
+      {!isConn&&!isSc&&<div style={{marginTop:'12px'}}><button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000',padding:'10px 24px',fontSize:'13px'}}>🔌 Reconnect to Angel One</button></div>}
+      {isSc&&(()=>{
+        const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
+        return<>
+          <div style={{width:'80%',maxWidth:'300px',margin:'16px auto'}}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'4px'}}>
+              <span style={{fontSize:'11px',color:'var(--t2)',fontFamily:"'JetBrains Mono'"}}>{p.current||0}/{p.total||'?'}</span>
+              <span style={{fontSize:'11px',color:'var(--gn)',fontFamily:"'JetBrains Mono'"}}>{pct}%</span>
+            </div>
+            <div className="scan-prog"style={{height:'8px'}}><div className="scan-fill"style={{width:`${pct}%`}}/></div>
+            {p.ok>0&&<p style={{fontSize:'10px',color:'var(--t3)',marginTop:'6px'}}>{p.ok} stocks analyzed · {p.errors||0} skipped</p>}
+          </div>
+          {p.rate_limited&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'340px'}}>⚠ Rate limited by Angel One. Scan aborted. Wait ~1 min and retry.</div>}
+        </>
+      })()}
+    </div></main></>;
   }
 
   const nB=(data.buy_signals||[]).length,nS=(data.sell_signals||[]).length,nP=(data.portfolio_holdings||[]).length;
   const ic=data.index_counts||{};
   const wlNames=Object.keys(watchlists);
   const scanDur=data.scan_duration_sec?`${(data.scan_duration_sec/60).toFixed(0)}m`:'';
-
+  const curMode2=status?.scan_mode||'top500';
+  const scanCount=status?.instruments_scan||nT;
   return<>
     <header className="hdr"><div className="hi">
       <div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div>
       <div className="hr">
+        <button className="bdg"onClick={toggleScanMode}style={{cursor:'pointer',border:curMode2==='full'?'1px solid var(--am)':'1px solid var(--bd)'}}>
+          {curMode2==='top500'?'TOP 500':'ALL NSE'}<span style={{fontSize:'8px',opacity:.6,marginLeft:'2px'}}>{scanCount}</span>
+        </button>
         <div className="bdg"><div className={`dot ${isSc?'w':'on'}`}/>{isSc?'SCANNING':'LIVE'}</div>
         <div className="bdg">{ago(data.last_scan)}{scanDur&&` · ${scanDur}`}</div>
         <button className="btn btn-g"onClick={triggerScan}disabled={isSc}>{isSc?'…':'▶'}</button>
@@ -265,15 +381,31 @@ function App(){
     </div></header>
     <main className="mn">
       {/* Stats */}
+      {scanError&&<div style={{padding:'8px 14px',background:'var(--rg)',borderRadius:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600,marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>{scanError}</span><button className="btn btn-sm"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button></div>}
       <div className="sts">
         <div className="st"><div className="stl">All NSE</div><div className="stv"style={{color:'var(--bl)'}}>{nT.toLocaleString()}</div><div className="sts2">{(data.errors||[]).length} skipped</div></div>
-        <div className="st"><div className="stl">Buy Signals</div><div className="stv"style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">≥70/100</div></div>
+        <div className="st"><div className="stl">Buy Signals</div><div className="stv"style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">≥60/110</div></div>
         <div className="st"><div className="stl">Sell</div><div className="stv"style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">≥3/5</div></div>
         <div className="st"><div className="stl">Portfolio</div><div className="stv"style={{color:'var(--pu)'}}>{nP}</div></div>
       </div>
 
       {/* Scanning progress bar */}
-      {isSc&&<div className="scan-bar"><div className="sp"style={{width:18,height:18,margin:0,borderWidth:2}}/><span className="scan-txt">Scanning in background... results update live</span></div>}
+      {isSc&&(()=>{
+        const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
+        return<div className="scan-bar"style={{flexDirection:'column',gap:'6px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'8px',width:'100%'}}>
+            <div className="sp"style={{width:16,height:16,margin:0,borderWidth:2,flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:'3px'}}>
+                <span className="scan-txt">{p.current||0}/{p.total||'?'} stocks</span>
+                <span className="scan-txt">{pct}%{p.ok>0&&` · ${p.ok} analyzed`}{p.errors>0&&` · ${p.errors} skipped`}</span>
+              </div>
+              <div className="scan-prog"><div className="scan-fill"style={{width:`${pct}%`}}/></div>
+            </div>
+          </div>
+          {p.rate_limited&&<div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600}}>⚠ Rate limited by Angel One — scan paused/aborted. Wait a minute and try again.</div>}
+        </div>
+      })()}
 
       {/* Index filter pills */}
       <div className="idx-row">
@@ -316,11 +448,11 @@ function App(){
           <tbody>{stocks.map(s=><tr key={s.symbol}onClick={()=>setSel(s)}style={{cursor:'pointer'}}>
             <td><div className="sn"><span className="sns">{s.name}</span>{s.in_portfolio&&<span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span><ITags indices={s.indices}/></div></td>
             <td style={{fontWeight:600}}>₹{fmt(s.price)}</td>
-            <td><span className={`score score-buy ${s.buy_score>=80?'strong':''}`}>{s.buy_score}</span></td>
+            <td><span className={`score score-buy ${s.buy_score>=75?'strong':''}`}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
-            <td><MACDSlope slope={s.macd_slope}/></td>
+            <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve}/></td>
             <td><RR ratio={s.rr_ratio}/></td>
-            <td>{s.buy_score>=80?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=70?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
+            <td>{s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
           </tr>)}</tbody>
         </table></div>}
       </div>
