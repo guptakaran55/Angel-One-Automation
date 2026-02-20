@@ -267,23 +267,23 @@ def analyze_stock(df):
     cm,cms,cmh = ml.iloc[-1],ms.iloc[-1],mh.iloc[-1]
 
     # ── MACD Derivatives (d/dt and d²/dt²) ──
-    # First derivative: slope of MACD line (velocity of momentum)
     cm_prev = ml.iloc[-2] if len(ml)>=2 else cm
     cm_prev2 = ml.iloc[-3] if len(ml)>=3 else cm_prev
-    macd_slope = float(cm - cm_prev) if ok(cm) and ok(cm_prev) else 0      # d(MACD)/dt
+    cm_prev3 = ml.iloc[-4] if len(ml)>=4 else cm_prev2
+    macd_slope = float(cm - cm_prev) if ok(cm) and ok(cm_prev) else 0
     macd_slope_prev = float(cm_prev - cm_prev2) if ok(cm_prev) and ok(cm_prev2) else 0
-    # Second derivative: rate of change of slope (acceleration of momentum)
-    macd_accel = macd_slope - macd_slope_prev  # d²(MACD)/dt²
+    macd_slope_prev2 = float(cm_prev2 - cm_prev3) if ok(cm_prev2) and ok(cm_prev3) else 0
+    macd_accel = macd_slope - macd_slope_prev
 
     # ── Momentum Phase Detection ──
-    # Phase 1 (EARLY BUY):  slope < 0 but accel > 0  → decline slowing, about to flip
-    # Phase 2 (BUY CONFIRM): slope crosses 0 from below (was neg, now pos)
-    # Phase 3 (EARLY SELL):  slope > 0 but accel < 0  → rise slowing, about to flip
-    # Phase 4 (SELL CONFIRM): slope crosses 0 from above (was pos, now neg)
-    slope_cross_up = bool(macd_slope > 0 and macd_slope_prev <= 0)   # just flipped positive
-    slope_cross_dn = bool(macd_slope < 0 and macd_slope_prev >= 0)   # just flipped negative
-    early_buy = bool(macd_slope < 0 and macd_accel > 0)              # decline decelerating
-    early_sell = bool(macd_slope > 0 and macd_accel < 0)             # rise decelerating
+    # Require slope to have been negative for 2+ days to call it a real "flip"
+    # This avoids false BUY FLIP from 1-day noise dips
+    was_negative_2d = bool(macd_slope_prev <= 0 and macd_slope_prev2 <= 0)
+    was_positive_2d = bool(macd_slope_prev >= 0 and macd_slope_prev2 >= 0)
+    slope_cross_up = bool(macd_slope > 0 and was_negative_2d)    # real flip from sustained decline
+    slope_cross_dn = bool(macd_slope < 0 and was_positive_2d)    # real flip from sustained rise
+    early_buy = bool(macd_slope < 0 and macd_accel > 0)
+    early_sell = bool(macd_slope > 0 and macd_accel < 0)
 
     if slope_cross_up:
         macd_phase = "BUY FLIP"
