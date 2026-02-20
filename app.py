@@ -135,18 +135,18 @@ def fetch_instrument_list():
 
 
 def apply_scan_mode():
-    """Filter instrument_list based on scan_mode. No re-download needed."""
+    """Filter instrument_list based on scan_mode. Known index stocks always come first."""
     global scan_instrument_list
+    known = ALL_KNOWN
+    known_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") in known]
+    other_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") not in known]
+
     if scan_mode == "full":
-        scan_instrument_list = instrument_list
-        logger.info(f"Scan mode: FULL — {len(scan_instrument_list)} stocks")
+        # Scan ALL but known stocks first so you get useful results early
+        scan_instrument_list = known_list + other_list
+        logger.info(f"Scan mode: FULL — {len(scan_instrument_list)} stocks ({len(known_list)} indexed first)")
     else:
-        # Top 500: use all known index members (~300) + next ~200 by sorting
-        # Angel One's instrument list is roughly ordered by market cap
-        known = ALL_KNOWN
-        known_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") in known]
-        other_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") not in known]
-        # Take first ~200 unknowns (roughly next by market cap in Angel's list)
+        # Top 500: known + next ~200 unknowns
         extra = other_list[:max(0, 500 - len(known_list))]
         scan_instrument_list = known_list + extra
         logger.info(f"Scan mode: TOP500 — {len(scan_instrument_list)} stocks ({len(known_list)} indexed + {len(extra)} other)")
@@ -155,9 +155,11 @@ def apply_scan_mode():
 # DATA FETCH
 # ═══════════════════════════════════════════════════════════════
 
+RATE_LIMITED = "RATE_LIMITED"  # sentinel value
+
 def fetch_candle_data(symbol_token):
-    """Fetch 365 days of daily candles."""
-    if not ensure_session(): return None
+    """Fetch 365 days of daily candles. Returns DataFrame, None (no data), or RATE_LIMITED."""
+    if not ensure_session(): return RATE_LIMITED
     try:
         to_d = datetime.now()
         from_d = to_d - timedelta(days=365)
@@ -172,8 +174,13 @@ def fetch_candle_data(symbol_token):
             df["DateTime"] = pd.to_datetime(df["DateTime"])
             df.set_index("DateTime", inplace=True)
             return df
+        # API responded but no data — stock is just thinly traded, NOT rate limited
         return None
     except Exception as e:
+        err_str = str(e)
+        if "access rate" in err_str.lower() or "rate" in err_str.lower():
+            logger.warning(f"Rate limited on {symbol_token}")
+            return RATE_LIMITED
         logger.debug(f"Candle error {symbol_token}: {e}")
         return None
 
@@ -429,7 +436,7 @@ def run_full_scan():
     scan_results["status"] = "scanning"
 
     total = len(scan_instrument_list)
-    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "rate_limited": False}
+    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
     logger.info(f"Starting scan ({scan_mode.upper()}): {total} stocks...")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
@@ -438,7 +445,7 @@ def run_full_scan():
     ptokens = {h["token"] for h in portfolio}
     idx_counts = {n: 0 for n in INDEX_NAMES}
     consecutive_errors = 0
-    MAX_CONSECUTIVE_ERRORS = 15  # abort if 15 in a row (likely rate limited)
+    MAX_CONSECUTIVE_ERRORS = 50  # higher threshold — many micro-caps return null legitimately
 
     for i, inst in enumerate(scan_instrument_list):
         # Check abort flag
@@ -460,27 +467,37 @@ def run_full_scan():
             break
 
         try:
-            df = fetch_candle_data(token)
-            if df is None:
-                # API returned nothing — this IS a potential rate limit issue
+            result = fetch_candle_data(token)
+
+            # TRUE rate limit / session dead — count toward abort
+            if result is RATE_LIMITED:
                 consecutive_errors += 1
-                errs.append({"symbol": sym, "error": "No data returned"})
+                errs.append({"symbol": sym, "error": "Rate limited"})
                 scan_progress["errors"] = len(errs)
-                continue
-            if len(df) < 50:
-                # Too few candles — not an API error, just a thinly traded stock
-                errs.append({"symbol": sym, "error": f"Only {len(df)} candles"})
-                scan_progress["errors"] = len(errs)
-                # Do NOT increment consecutive_errors — this is normal for small caps
-                continue
-            a = analyze_stock(df)
-            if a is None:
-                # Analysis failed but API worked — not a rate limit
-                errs.append({"symbol": sym, "error": "Analysis returned None"})
-                scan_progress["errors"] = len(errs)
+                # Back off a bit when rate limited
+                time.sleep(2)
                 continue
 
-            # Success — reset consecutive error counter
+            # No data returned (thinly traded stock) — NOT a rate limit
+            if result is None:
+                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
+                consecutive_errors = 0
+                continue
+
+            df = result
+            if len(df) < 50:
+                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
+                consecutive_errors = 0
+                continue
+
+            a = analyze_stock(df)
+            if a is None:
+                errs.append({"symbol": sym, "error": "Analysis failed"})
+                scan_progress["errors"] = len(errs)
+                consecutive_errors = 0  # API worked fine
+                continue
+
+            # ✅ Success — reset consecutive error counter
             consecutive_errors = 0
 
             indices = get_indices_for(clean, INDEX_MAP)
@@ -507,9 +524,15 @@ def run_full_scan():
 
             time.sleep(0.5)  # 2 req/s — safe margin under 3/s limit
         except Exception as e:
-            errs.append({"symbol": sym, "error": str(e)})
+            err_str = str(e)
+            errs.append({"symbol": sym, "error": err_str})
             scan_progress["errors"] = len(errs)
-            consecutive_errors += 1
+            # Only count as consecutive error if it looks like rate limiting
+            if "access rate" in err_str.lower() or "rate" in err_str.lower() or "timeout" in err_str.lower():
+                consecutive_errors += 1
+                time.sleep(2)
+            else:
+                consecutive_errors = 0
 
         if (i+1) % 50 == 0:
             elapsed_so_far = time.time() - t0
