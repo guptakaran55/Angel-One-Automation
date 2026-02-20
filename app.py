@@ -394,6 +394,28 @@ def analyze_stock(df):
     }
     sell_count = sum(sell_c.values())
 
+    # ── Price Rate of Change & Acceleration ──
+    # ROC = % change over N days. Accel = ROC today - ROC yesterday
+    p0 = float(close.iloc[-1])
+    p1 = float(close.iloc[-2]) if n_candles >= 2 else p0
+    p2 = float(close.iloc[-3]) if n_candles >= 3 else p1
+    p3 = float(close.iloc[-4]) if n_candles >= 4 else p2
+    p5 = float(close.iloc[-6]) if n_candles >= 6 else p0
+    # 3-day ROC (%)
+    roc3 = ((p0 - p3) / p3 * 100) if p3 > 0 else 0
+    # Daily price velocity (today vs yesterday, as %)
+    price_vel = ((p0 - p1) / p1 * 100) if p1 > 0 else 0
+    price_vel_prev = ((p1 - p2) / p2 * 100) if p2 > 0 else 0
+    # Price acceleration = change in velocity
+    price_accel = price_vel - price_vel_prev
+    # Consecutive up days
+    up_days = 0
+    for idx in range(1, min(6, n_candles)):
+        if float(close.iloc[-idx]) > float(close.iloc[-idx-1]):
+            up_days += 1
+        else:
+            break
+
     return {
         "price":sf(price),"sma200":sf(s200),"rsi":sf(r14),
         "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
@@ -401,6 +423,8 @@ def analyze_stock(df):
         "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),
         "macd_phase":macd_phase,"macd_curve":macd_curve,
         "obv":sf(co,0),"adx":sf(curr_adx),
+        "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
+        "price_accel":round(price_accel,3),"up_days":up_days,
         "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
         "sell_conditions":sell_c,"sell_count":f"{sell_count}/6","sell_pct":sell_count/6*100,
