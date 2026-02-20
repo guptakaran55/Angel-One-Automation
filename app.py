@@ -35,6 +35,7 @@ refresh_token = None
 instrument_list = []       # full list from Angel One
 scan_instrument_list = []  # filtered list based on scan_mode
 is_scanning = False
+abort_scan = False
 credentials_ok = False
 last_login_attempt = 0     # timestamp of last login attempt
 login_backoff = 1          # exponential backoff seconds
@@ -418,12 +419,13 @@ def analyze_stock(df):
 # ═══════════════════════════════════════════════════════════════
 
 def run_full_scan():
-    global scan_results, is_scanning, scan_progress
+    global scan_results, is_scanning, scan_progress, abort_scan
     if not credentials_ok:
         logger.error("Cannot scan — not logged in")
         return
     if is_scanning: return
     is_scanning = True
+    abort_scan = False
     scan_results["status"] = "scanning"
 
     total = len(scan_instrument_list)
@@ -439,6 +441,11 @@ def run_full_scan():
     MAX_CONSECUTIVE_ERRORS = 15  # abort if 15 in a row (likely rate limited)
 
     for i, inst in enumerate(scan_instrument_list):
+        # Check abort flag
+        if abort_scan:
+            logger.info("Scan aborted by user.")
+            break
+
         sym, token = inst["symbol"], inst["token"]
         name = inst.get("name", sym.replace("-EQ",""))
         clean = sym.replace("-EQ","")
@@ -573,6 +580,42 @@ def api_reconnect():
             fetch_instrument_list()
         return jsonify({"status": "connected", "instruments_scan": len(scan_instrument_list)})
     return jsonify({"error": "Login failed. Check credentials or try again in a minute."}), 500
+
+@app.route("/api/stop", methods=["POST"])
+def api_stop_scan():
+    """Abort a running scan."""
+    global abort_scan
+    if not is_scanning:
+        return jsonify({"status": "not_scanning"})
+    abort_scan = True
+    return jsonify({"status": "stopping"})
+
+@app.route("/api/reset", methods=["POST"])
+def api_reset():
+    """Clear all scan results and reset to fresh state. Optionally re-login."""
+    global scan_results, is_scanning, abort_scan, scan_progress
+    # Stop any running scan first
+    if is_scanning:
+        abort_scan = True
+        # Wait briefly for scan to stop
+        for _ in range(20):
+            if not is_scanning: break
+            time.sleep(0.25)
+    # Clear everything
+    scan_results = {
+        "last_scan": None, "status": "not_started", "total_scanned": 0,
+        "buy_signals": [], "sell_signals": [], "all_stocks": [],
+        "portfolio_holdings": [], "errors": [],
+        "index_counts": {n: 0 for n in INDEX_NAMES},
+    }
+    scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "rate_limited": False}
+    abort_scan = False
+    # Re-login to get fresh session
+    create_session()
+    if len(instrument_list) == 0:
+        fetch_instrument_list()
+    logger.info("Reset complete. Ready for fresh scan.")
+    return jsonify({"status": "reset", "connected": credentials_ok, "instruments_scan": len(scan_instrument_list)})
 
 @app.route("/api/scan", methods=["POST"])
 def api_trigger_scan():
