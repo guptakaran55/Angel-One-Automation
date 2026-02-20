@@ -11,7 +11,7 @@ import numpy as np, pandas as pd, pyotp, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from SmartApi import SmartConnect
-from index_data import build_index_map, get_indices_for, INDEX_NAMES, ALL_KNOWN
+from index_data import get_scan_universe, build_index_tags, get_tags_for
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,29 +25,25 @@ PASSWORD   = os.getenv("ANGEL_PASSWORD", "")
 TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
-# SCAN_MODE: "top500" (fast ~5min) or "full" (all NSE ~15min)
-scan_mode = os.getenv("SCAN_MODE", "top500").lower()
-
-INDEX_MAP = build_index_map()
+INDEX_TAGS = build_index_tags()
+SCAN_UNIVERSE = set()  # populated at startup from NIFTY 500
 
 smart_api = None
 refresh_token = None
-instrument_list = []       # full list from Angel One
-scan_instrument_list = []  # filtered list based on scan_mode
+instrument_list = []       # full NSE list from Angel One
+scan_instrument_list = []  # filtered to NIFTY 500 only
 is_scanning = False
 abort_scan = False
 credentials_ok = False
-last_login_attempt = 0     # timestamp of last login attempt
-login_backoff = 1          # exponential backoff seconds
+last_login_attempt = 0
+login_backoff = 1
 
-# Live scan progress (read by frontend)
-scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "rate_limited": False}
+scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
 
 scan_results = {
     "last_scan": None, "status": "not_started", "total_scanned": 0,
     "buy_signals": [], "sell_signals": [], "all_stocks": [],
     "portfolio_holdings": [], "errors": [],
-    "index_counts": {n: 0 for n in INDEX_NAMES},
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -112,44 +108,34 @@ def ensure_session():
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_instrument_list():
-    """Download ALL NSE equities, then apply scan_mode filter."""
-    global instrument_list, scan_instrument_list
+    """Download NSE instruments from Angel One, filter to NIFTY 500 universe only."""
+    global instrument_list, scan_instrument_list, SCAN_UNIVERSE
     try:
+        # Get NIFTY 500 universe (dynamic from NSE or fallback)
+        SCAN_UNIVERSE = get_scan_universe()
+
         url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        logger.info("Downloading instrument list...")
+        logger.info("Downloading Angel One instrument list...")
         resp = requests.get(url, timeout=120)
         all_inst = resp.json()
 
-        # Full NSE equity list (always kept for switching modes without re-download)
+        # All NSE equities
         instrument_list = [
             i for i in all_inst
             if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")
         ]
         logger.info(f"Total NSE equities: {len(instrument_list)}")
 
-        apply_scan_mode()
+        # Filter to only NIFTY 500 / known universe
+        scan_instrument_list = [
+            i for i in instrument_list
+            if i["symbol"].replace("-EQ", "") in SCAN_UNIVERSE
+        ]
+        logger.info(f"Scan list: {len(scan_instrument_list)} stocks (NIFTY 500 universe)")
         return True
     except Exception as e:
         logger.error(f"Instrument fetch failed: {e}")
         return False
-
-
-def apply_scan_mode():
-    """Filter instrument_list based on scan_mode. Known index stocks always come first."""
-    global scan_instrument_list
-    known = ALL_KNOWN
-    known_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") in known]
-    other_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") not in known]
-
-    if scan_mode == "full":
-        # Scan ALL but known stocks first so you get useful results early
-        scan_instrument_list = known_list + other_list
-        logger.info(f"Scan mode: FULL — {len(scan_instrument_list)} stocks ({len(known_list)} indexed first)")
-    else:
-        # Top 500: known + next ~200 unknowns
-        extra = other_list[:max(0, 500 - len(known_list))]
-        scan_instrument_list = known_list + extra
-        logger.info(f"Scan mode: TOP500 — {len(scan_instrument_list)} stocks ({len(known_list)} indexed + {len(extra)} other)")
 
 # ═══════════════════════════════════════════════════════════════
 # DATA FETCH
@@ -437,15 +423,14 @@ def run_full_scan():
 
     total = len(scan_instrument_list)
     scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
-    logger.info(f"Starting scan ({scan_mode.upper()}): {total} stocks...")
+    logger.info(f"Starting scan: {total} stocks...")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
 
     portfolio = fetch_portfolio()
     ptokens = {h["token"] for h in portfolio}
-    idx_counts = {n: 0 for n in INDEX_NAMES}
     consecutive_errors = 0
-    MAX_CONSECUTIVE_ERRORS = 50  # higher threshold — many micro-caps return null legitimately
+    MAX_CONSECUTIVE_ERRORS = 50
 
     for i, inst in enumerate(scan_instrument_list):
         # Check abort flag
@@ -474,8 +459,13 @@ def run_full_scan():
                 consecutive_errors += 1
                 errs.append({"symbol": sym, "error": "Rate limited"})
                 scan_progress["errors"] = len(errs)
-                # Back off a bit when rate limited
-                time.sleep(2)
+                # Back off and try refreshing session
+                logger.warning(f"Rate limited at stock {i+1}, backing off 5s...")
+                time.sleep(5)
+                try:
+                    create_session()
+                except:
+                    pass
                 continue
 
             # No data returned (thinly traded stock) — NOT a rate limit
@@ -500,14 +490,11 @@ def run_full_scan():
             # ✅ Success — reset consecutive error counter
             consecutive_errors = 0
 
-            indices = get_indices_for(clean, INDEX_MAP)
+            indices = get_tags_for(clean, INDEX_TAGS)
             stock = {"symbol": sym, "name": name, "token": token,
                      "in_portfolio": token in ptokens, "indices": indices, **a}
             all_s.append(stock)
             scan_progress["ok"] = len(all_s)
-
-            for ix in indices:
-                if ix in idx_counts: idx_counts[ix] += 1
 
             if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
             if a["is_sell"] and token in ptokens: sells.append(stock)
@@ -519,10 +506,9 @@ def run_full_scan():
                     "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
                     "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
                     "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
-                    "index_counts": idx_counts.copy(),
                 })
 
-            time.sleep(0.5)  # 2 req/s — safe margin under 3/s limit
+            time.sleep(0.7)  # ~1.4 req/s — safe margin, avoids rate limit at scale
         except Exception as e:
             err_str = str(e)
             errs.append({"symbol": sym, "error": err_str})
@@ -530,9 +516,18 @@ def run_full_scan():
             # Only count as consecutive error if it looks like rate limiting
             if "access rate" in err_str.lower() or "rate" in err_str.lower() or "timeout" in err_str.lower():
                 consecutive_errors += 1
-                time.sleep(2)
+                time.sleep(3)
             else:
                 consecutive_errors = 0
+
+        # Proactive session refresh every 150 stocks to avoid mid-scan token expiry
+        if (i+1) % 150 == 0:
+            try:
+                logger.info(f"  Refreshing session at stock {i+1}...")
+                create_session()
+                time.sleep(1)
+            except:
+                pass
 
         if (i+1) % 50 == 0:
             elapsed_so_far = time.time() - t0
@@ -547,12 +542,10 @@ def run_full_scan():
         "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
         "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
         "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
-        "portfolio_holdings": portfolio, "errors": errs, "index_counts": idx_counts,
+        "portfolio_holdings": portfolio, "errors": errs,
     }
     is_scanning = False
-    logger.info(f"FULL SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys, {len(sells)} sells, {len(errs)} errors")
-    for ix, cnt in idx_counts.items():
-        if cnt > 0: logger.info(f"  {ix}: {cnt}")
+    logger.info(f"SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys, {len(sells)} sells, {len(errs)} errors")
 
 # ═══════════════════════════════════════════════════════════════
 # SCHEDULER
@@ -575,23 +568,10 @@ def scheduler():
 @app.route("/api/status")
 def api_status():
     return jsonify({"connected": credentials_ok,
-                    "instruments_total": len(instrument_list),
                     "instruments_scan": len(scan_instrument_list),
-                    "scan_mode": scan_mode,
                     "last_scan": scan_results.get("last_scan"),
                     "scan_status": scan_results.get("status"), "is_scanning": is_scanning,
-                    "index_counts": scan_results.get("index_counts", {}),
                     "missing": check_credentials()})
-
-@app.route("/api/scan_mode", methods=["POST"])
-def api_set_scan_mode():
-    global scan_mode
-    mode = request.json.get("mode", "top500").lower()
-    if mode not in ("top500", "full"):
-        return jsonify({"error": "Invalid mode. Use 'top500' or 'full'"}), 400
-    scan_mode = mode
-    apply_scan_mode()
-    return jsonify({"scan_mode": scan_mode, "instruments_scan": len(scan_instrument_list)})
 
 @app.route("/api/reconnect", methods=["POST"])
 def api_reconnect():
@@ -629,9 +609,8 @@ def api_reset():
         "last_scan": None, "status": "not_started", "total_scanned": 0,
         "buy_signals": [], "sell_signals": [], "all_stocks": [],
         "portfolio_holdings": [], "errors": [],
-        "index_counts": {n: 0 for n in INDEX_NAMES},
     }
-    scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "rate_limited": False}
+    scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
     abort_scan = False
     # Re-login to get fresh session
     create_session()
@@ -724,5 +703,5 @@ def initialize():
         logger.warning("Initial login failed — server starting anyway. Use Reconnect button in browser.")
 
     threading.Thread(target=scheduler, daemon=True).start()
-    logger.info(f"Ready. Scan mode: {scan_mode.upper()} ({len(scan_instrument_list)} stocks).")
+    logger.info(f"Ready. {len(scan_instrument_list)} stocks (NIFTY 500).")
     return True
