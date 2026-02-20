@@ -283,7 +283,15 @@ function App(){
 
   const stocks=useMemo(()=>{
     if(!data)return[];
-    let l=tab==='buy'?data.buy_signals||[]:tab==='sell'?data.sell_signals||[]:tab==='port'?(data.all_stocks||[]).filter(s=>s.in_portfolio):data.all_stocks||[];
+    let l=tab==='buy'?data.buy_signals||[]
+      :tab==='sell'?data.sell_signals||[]
+      :tab==='port'?(data.all_stocks||[]).filter(s=>s.in_portfolio)
+      :tab==='setups'?(data.all_stocks||[]).filter(s=>{
+        const smaOk=s.buy_breakdown?.sma200?.pass;
+        const macdFlip=s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY';
+        return smaOk&&macdFlip;
+      })
+      :data.all_stocks||[];
     if(activeWL){
       const syms=watchlists[activeWL]||[];
       l=(data.all_stocks||[]).filter(s=>syms.includes(s.symbol));
@@ -293,12 +301,17 @@ function App(){
   },[data,activeWL,watchlists,tab,search,sortK,sortA]);
 
   const filteredCounts=useMemo(()=>{
-    if(!data)return{all:0,buy:0,sell:0,port:0};
+    if(!data)return{all:0,buy:0,sell:0,port:0,setups:0};
     const f=s=>{
       if(activeWL)return(watchlists[activeWL]||[]).includes(s.symbol);
       return true;
     };
-    return{all:(data.all_stocks||[]).filter(f).length,buy:(data.buy_signals||[]).filter(f).length,sell:(data.sell_signals||[]).filter(f).length,port:(data.all_stocks||[]).filter(s=>s.in_portfolio&&f(s)).length}
+    const setupFilter=s=>{
+      const smaOk=s.buy_breakdown?.sma200?.pass;
+      const macdFlip=s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY';
+      return smaOk&&macdFlip;
+    };
+    return{all:(data.all_stocks||[]).filter(f).length,buy:(data.buy_signals||[]).filter(f).length,sell:(data.sell_signals||[]).filter(f).length,port:(data.all_stocks||[]).filter(s=>s.in_portfolio&&f(s)).length,setups:(data.all_stocks||[]).filter(s=>setupFilter(s)&&f(s)).length}
   },[data,activeWL,watchlists]);
 
   if(loading)return<div className="ld"><div className="sp"/>Connecting...</div>;
@@ -401,6 +414,7 @@ function App(){
       {/* Signal tabs */}
       <div className="tabs">
         <button className={`tab ${tab==='all'?'a':''}`}onClick={()=>setTab('all')}>All<span className="tc tcb">{filteredCounts.all}</span></button>
+        <button className={`tab ${tab==='setups'?'a':''}`}onClick={()=>setTab('setups')}style={tab==='setups'?{background:'rgba(16,185,129,.15)'}:{}}>🎯 Setups<span className="tc tcg">{filteredCounts.setups}</span></button>
         <button className={`tab ${tab==='buy'?'a':''}`}onClick={()=>setTab('buy')}>Buy<span className="tc tcg">{filteredCounts.buy}</span></button>
         <button className={`tab ${tab==='sell'?'a':''}`}onClick={()=>setTab('sell')}>Sell<span className="tc tcr">{filteredCounts.sell}</span></button>
         <button className={`tab ${tab==='port'?'a':''}`}onClick={()=>setTab('port')}>Portfolio<span className="tc tcb">{filteredCounts.port}</span></button>
