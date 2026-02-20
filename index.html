@@ -32,17 +32,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-h
 .stv{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-1px}
 .sts2{font-size:9px;color:var(--t3);font-family:'JetBrains Mono',monospace}
 /* Index pill row */
-.idx-row{display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap;padding-bottom:6px}
-.idx-btn{padding:5px 11px;border-radius:18px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--cd);color:var(--t3);display:flex;align-items:center;gap:4px;transition:.15s;white-space:nowrap}
-.idx-btn:hover{border-color:var(--bd2);color:var(--t2)}
-.idx-btn.a{color:#fff}
-.idx-btn.a[data-idx="all"]{background:var(--bl);border-color:var(--bl)}
-.idx-btn.a[data-idx="NIFTY 50"]{background:#7c3aed;border-color:#7c3aed}
-.idx-btn.a[data-idx="NIFTY 100"]{background:var(--cy);border-color:var(--cy)}
-.idx-btn.a[data-idx="NIFTY 200"]{background:var(--tl);border-color:var(--tl)}
-.idx-btn.a[data-idx="BSE 100"]{background:var(--or);border-color:var(--or)}
-.idx-btn.a[data-idx="MIDCAP 150"]{background:var(--pk);border-color:var(--pk)}
-.idx-btn.a[data-idx="OTHER NSE"]{background:var(--t3);border-color:var(--t3)}
 .idx-cnt{font-family:'JetBrains Mono',monospace;font-size:9px;opacity:.8}
 /* Signal tabs */
 .tabs{display:flex;gap:2px;background:var(--bg2);padding:3px;border-radius:9px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -58,13 +47,10 @@ td{padding:10px;border-bottom:1px solid rgba(30,41,59,.3);white-space:nowrap;fon
 tr{transition:background .1s}tr:active{background:var(--cdh)}
 .sn{font-family:'DM Sans',sans-serif}.sns{font-weight:700;font-size:12px;color:var(--t1)}.snn{font-size:9px;color:var(--t3)}
 .pb{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;background:rgba(139,92,246,.12);color:var(--pu);margin-left:4px}
-.itag{display:inline-block;padding:1px 4px;border-radius:3px;font-size:7px;font-weight:700;margin-left:3px}
+.itag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;margin-left:3px}
 .itag-n50{background:rgba(124,58,237,.15);color:#a78bfa}
 .itag-n100{background:rgba(6,182,212,.15);color:var(--cy)}
-.itag-n200{background:rgba(20,184,166,.15);color:#2dd4bf}
 .itag-bse{background:rgba(249,115,22,.15);color:var(--or)}
-.itag-mid{background:rgba(236,72,153,.15);color:#f472b6}
-.itag-other{background:rgba(100,116,139,.12);color:var(--t3)}
 .score{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;cursor:pointer;display:inline-block;min-width:40px;text-align:center}
 .score-buy{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.25)}.score-buy.strong{background:rgba(16,185,129,.2);box-shadow:0 0 8px rgba(16,185,129,.15)}
 .score-sell{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.25)}
@@ -120,17 +106,7 @@ const {useState,useEffect,useCallback,useMemo,useRef}=React;
 const API=window.location.origin;
 const fmt=(n,d=2)=>n!=null?Number(n).toFixed(d):'—';
 const ago=(iso)=>{if(!iso)return'Never';const d=(Date.now()-new Date(iso).getTime())/1e3;if(d<60)return`${Math.floor(d)}s`;if(d<3600)return`${Math.floor(d/60)}m`;return`${Math.floor(d/3600)}h`};
-const ITAG_CLS={"NIFTY 50":"itag-n50","NIFTY 100":"itag-n100","NIFTY 200":"itag-n200","BSE 100":"itag-bse","MIDCAP 150":"itag-mid","OTHER NSE":"itag-other"};
-
-const IDX_TABS=[
-  {k:'all',l:'All NSE'},
-  {k:'NIFTY 50',l:'NIFTY 50'},
-  {k:'NIFTY 100',l:'NIFTY 100'},
-  {k:'NIFTY 200',l:'NIFTY 200'},
-  {k:'BSE 100',l:'BSE 100'},
-  {k:'MIDCAP 150',l:'Midcap 150'},
-  {k:'OTHER NSE',l:'Other NSE'},
-];
+const ITAG_CLS={"NIFTY 50":"itag-n50","NIFTY 100":"itag-n100","BSE 100":"itag-bse"};
 
 function loadWL(){try{return JSON.parse(localStorage.getItem('ss_watchlists'))||{}}catch(e){return{}}}
 function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
@@ -174,7 +150,7 @@ function Modal({s,onClose,watchlists,onAddToWL}){
         <span style={{fontSize:'11px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}}>{s.symbol}</span>
         {s.in_portfolio&&<span className="pb">HELD</span>}
       </div>
-      <div style={{marginTop:'2px'}}><ITags indices={s.indices}/></div>
+      <div style={{marginTop:'4px'}}>{s.indices&&s.indices.length>0?<><span style={{fontSize:'9px',color:'var(--t3)',marginRight:'4px'}}>Listed in:</span><ITags indices={s.indices}/></>:<span style={{fontSize:'9px',color:'var(--t3)'}}>NIFTY 500</span>}</div>
       <div style={{marginTop:'4px',fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}>₹{fmt(s.price)}</div>
       {wlNames.length>0&&<div style={{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'}}>
         {wlNames.map(wn=>{const inIt=watchlists[wn]?.includes(s.symbol);
@@ -249,7 +225,6 @@ function Modal({s,onClose,watchlists,onAddToWL}){
 function App(){
   const[data,setData]=useState(null);const[status,setStatus]=useState(null);const[loading,setLoading]=useState(true);
   const[progress,setProgress]=useState(null);
-  const[idxFilter,setIdxFilter]=useState('all');
   const[tab,setTab]=useState('all');const[search,setSearch]=useState('');const[sortK,setSortK]=useState('buy_score');const[sortA,setSortA]=useState(false);const[sel,setSel]=useState(null);
   const[watchlists,setWatchlists]=useState(loadWL);
   const[activeWL,setActiveWL]=useState(null);
@@ -259,7 +234,7 @@ function App(){
 
   const setAndSaveWL=(w)=>{setWatchlists(w);saveWL(w)};
   const createWL=(name)=>{if(!name.trim())return;const w={...watchlists,[name.trim()]:[]};setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
-  const deleteWL=(name)=>{const w={...watchlists};delete w[name];setAndSaveWL(w);if(activeWL===name){setActiveWL(null);setIdxFilter('all')}};
+  const deleteWL=(name)=>{const w={...watchlists};delete w[name];setAndSaveWL(w);if(activeWL===name)setActiveWL(null)};
   const toggleInWL=(wlName,symbol,add)=>{const w={...watchlists};if(!w[wlName])w[wlName]=[];if(add&&!w[wlName].includes(symbol))w[wlName].push(symbol);if(!add)w[wlName]=w[wlName].filter(s=>s!==symbol);setAndSaveWL(w)};
 
   useEffect(()=>{if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
@@ -304,34 +279,27 @@ function App(){
       },500);
     }catch(e){setScanError('Network error')}
   };
-  const toggleScanMode=async()=>{
-    const newMode=status?.scan_mode==='top500'?'full':'top500';
-    try{await fetch(`${API}/api/scan_mode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:newMode})});fetchAll()}catch(e){}
-  };
   const doSort=(k)=>{if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
 
   const stocks=useMemo(()=>{
     if(!data)return[];
     let l=tab==='buy'?data.buy_signals||[]:tab==='sell'?data.sell_signals||[]:tab==='port'?(data.all_stocks||[]).filter(s=>s.in_portfolio):data.all_stocks||[];
-    if(idxFilter==='watchlist'&&activeWL){
+    if(activeWL){
       const syms=watchlists[activeWL]||[];
       l=(data.all_stocks||[]).filter(s=>syms.includes(s.symbol));
-    }else if(idxFilter!=='all'){
-      l=l.filter(s=>s.indices&&s.indices.includes(idxFilter));
     }
     if(search){const q=search.toLowerCase();l=l.filter(s=>s.symbol.toLowerCase().includes(q)||s.name.toLowerCase().includes(q))}
     return[...l].sort((a,b)=>{const va=a[sortK],vb=b[sortK];if(va==null)return 1;if(vb==null)return-1;return sortA?(va>vb?1:-1):(va<vb?1:-1)})
-  },[data,idxFilter,activeWL,watchlists,tab,search,sortK,sortA]);
+  },[data,activeWL,watchlists,tab,search,sortK,sortA]);
 
   const filteredCounts=useMemo(()=>{
     if(!data)return{all:0,buy:0,sell:0,port:0};
     const f=s=>{
-      if(idxFilter==='watchlist'&&activeWL)return(watchlists[activeWL]||[]).includes(s.symbol);
-      if(idxFilter!=='all')return s.indices&&s.indices.includes(idxFilter);
+      if(activeWL)return(watchlists[activeWL]||[]).includes(s.symbol);
       return true;
     };
     return{all:(data.all_stocks||[]).filter(f).length,buy:(data.buy_signals||[]).filter(f).length,sell:(data.sell_signals||[]).filter(f).length,port:(data.all_stocks||[]).filter(s=>s.in_portfolio&&f(s)).length}
-  },[data,idxFilter,activeWL,watchlists]);
+  },[data,activeWL,watchlists]);
 
   if(loading)return<div className="ld"><div className="sp"/>Connecting...</div>;
   if(status&&!status.connected&&status.missing?.length>0){
@@ -340,8 +308,7 @@ function App(){
 
   const nT=data?.total_scanned||0;
   const isSc=data?.status==='scanning'||status?.is_scanning;
-  const instCount=status?.instruments_scan||status?.instruments||0;
-  const curMode=status?.scan_mode||'top500';
+  const instCount=status?.instruments_scan||0;
 
   if(!data||!data.last_scan||nT===0){
     const isConn=status?.connected;
@@ -354,12 +321,8 @@ function App(){
       <div style={{fontSize:'40px'}}>{isSc?'⏳':isConn?'📊':'🔌'}</div>
       <h2>{isSc?'Scanning...':isConn?'Ready to scan':'Connection failed'}</h2>
       {!isConn&&!isSc&&<p style={{color:'var(--rd)'}}>Could not connect to Angel One. This usually happens if the API timed out or you were rate-limited. Click Reconnect to try again.</p>}
-      {isConn&&!isSc&&<p>Choose scan mode, then tap Scan.</p>}
+      {isConn&&!isSc&&<p>NIFTY 500 · {instCount} stocks ready. Tap Scan to start.</p>}
       {scanError&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'380px'}}>{scanError}</div>}
-      {!isSc&&isConn&&<div style={{display:'flex',gap:'8px',justifyContent:'center',marginBottom:'16px'}}>
-        <button className={`btn ${curMode==='top500'?'btn-g':''}`}onClick={()=>{if(curMode!=='top500')toggleScanMode()}} style={{minWidth:'110px'}}>Top 500 <span style={{fontSize:'9px',opacity:.7}}>~5min</span></button>
-        <button className={`btn ${curMode==='full'?'btn-g':''}`}onClick={()=>{if(curMode!=='full')toggleScanMode()}} style={{minWidth:'110px'}}>All NSE <span style={{fontSize:'9px',opacity:.7}}>~15min</span></button>
-      </div>}
       {!isConn&&!isSc&&<div style={{marginTop:'12px'}}><button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000',padding:'10px 24px',fontSize:'13px'}}>🔌 Reconnect to Angel One</button></div>}
       {isSc&&(()=>{
         const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
@@ -379,18 +342,13 @@ function App(){
   }
 
   const nB=(data.buy_signals||[]).length,nS=(data.sell_signals||[]).length,nP=(data.portfolio_holdings||[]).length;
-  const ic=data.index_counts||{};
   const wlNames=Object.keys(watchlists);
   const scanDur=data.scan_duration_sec?`${(data.scan_duration_sec/60).toFixed(0)}m`:'';
-  const curMode2=status?.scan_mode||'top500';
-  const scanCount=status?.instruments_scan||nT;
   return<>
     <header className="hdr"><div className="hi">
       <div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div>
       <div className="hr">
-        <button className="bdg"onClick={toggleScanMode}style={{cursor:'pointer',border:curMode2==='full'?'1px solid var(--am)':'1px solid var(--bd)'}}>
-          {curMode2==='top500'?'TOP 500':'ALL NSE'}<span style={{fontSize:'8px',opacity:.6,marginLeft:'2px'}}>{scanCount}</span>
-        </button>
+        <div className="bdg">{instCount||nT} stocks</div>
         <div className="bdg"><div className={`dot ${isSc?'w':'on'}`}/>{isSc?'SCANNING':'LIVE'}</div>
         <div className="bdg">{ago(data.last_scan)}{scanDur&&` · ${scanDur}`}</div>
         {isSc?<button className="btn btn-r"onClick={stopScan}>⏹ Stop</button>
@@ -402,7 +360,7 @@ function App(){
       {/* Stats */}
       {scanError&&<div style={{padding:'8px 14px',background:'var(--rg)',borderRadius:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600,marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>{scanError}</span><button className="btn btn-sm"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button></div>}
       <div className="sts">
-        <div className="st"><div className="stl">All NSE</div><div className="stv"style={{color:'var(--bl)'}}>{nT.toLocaleString()}</div><div className="sts2">{progress?.skipped||0} skipped</div></div>
+        <div className="st"><div className="stl">NIFTY 500</div><div className="stv"style={{color:'var(--bl)'}}>{nT.toLocaleString()}</div><div className="sts2">{progress?.skipped||0} skipped</div></div>
         <div className="st"><div className="stl">Buy Signals</div><div className="stv"style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">≥60/110</div></div>
         <div className="st"><div className="stl">Sell</div><div className="stv"style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">≥3/6</div></div>
         <div className="st"><div className="stl">Portfolio</div><div className="stv"style={{color:'var(--pu)'}}>{nP}</div></div>
@@ -429,15 +387,10 @@ function App(){
         </div>
       })()}
 
-      {/* Index filter pills */}
-      <div className="idx-row">
-        {IDX_TABS.map(x=><button key={x.k}className={`idx-btn ${idxFilter===x.k?'a':''}`}data-idx={x.k}onClick={()=>{setIdxFilter(x.k);setActiveWL(null);setTab('all')}}>{x.l}<span className="idx-cnt">{x.k==='all'?nT:(ic[x.k]||0)}</span></button>)}
-      </div>
-
       {/* Watchlist bar */}
       <div className="wl-bar">
         <span style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'.5px'}}>Watchlists:</span>
-        {wlNames.map(wn=><div key={wn}className={`wl-chip ${idxFilter==='watchlist'&&activeWL===wn?'a':''}`}onClick={()=>{setIdxFilter('watchlist');setActiveWL(wn);setTab('all')}}>
+        {wlNames.map(wn=><div key={wn}className={`wl-chip ${activeWL===wn?'a':''}`}onClick={()=>{setActiveWL(activeWL===wn?null:wn);setTab('all')}}>
           {wn}<span className="idx-cnt">{(watchlists[wn]||[]).length}</span>
           <span className="x"onClick={e=>{e.stopPropagation();if(confirm(`Delete "${wn}"?`))deleteWL(wn)}}>✕</span>
         </div>)}
@@ -456,7 +409,7 @@ function App(){
       <div className="srch"><input placeholder="Search any NSE stock..."value={search}onChange={e=>setSearch(e.target.value)}/></div>
 
       <div className="tc2">
-        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{idxFilter==='watchlist'?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{idxFilter==='watchlist'&&activeWL?`"${activeWL}" is empty. Click a stock → add to watchlist.`:search?`No match for "${search}"`:'No stocks for this filter'}</div></div>
+        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{activeWL?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{activeWL?`"${activeWL}" is empty. Click a stock → add to watchlist.`:search?`No match for "${search}"`:'No stocks yet. Run a scan.'}</div></div>
         :<div className="ts"><table>
           <thead><tr>
             <th onClick={()=>doSort('symbol')}>Stock</th>
@@ -468,7 +421,7 @@ function App(){
             <th>Signal</th>
           </tr></thead>
           <tbody>{stocks.map(s=><tr key={s.symbol}onClick={()=>setSel(s)}style={{cursor:'pointer'}}>
-            <td><div className="sn"><span className="sns">{s.name}</span>{s.in_portfolio&&<span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span><ITags indices={s.indices}/></div></td>
+            <td><div className="sn"><span className="sns">{s.name}</span>{s.in_portfolio&&<span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span></div></td>
             <td style={{fontWeight:600}}>₹{fmt(s.price)}</td>
             <td><span className={`score score-buy ${s.buy_score>=75?'strong':''}`}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
