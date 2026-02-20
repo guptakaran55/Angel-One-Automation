@@ -1,489 +1,728 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="theme-color" content="#0a0e17"/>
-<title>SignalScope</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-<style>
-:root{--bg:#0a0e17;--bg2:#111827;--cd:#151d2e;--cdh:#1a2438;--bd:#1e293b;--bd2:#334155;--t1:#f1f5f9;--t2:#94a3b8;--t3:#64748b;--gn:#10b981;--gg:rgba(16,185,129,.12);--rd:#ef4444;--rg:rgba(239,68,68,.12);--am:#f59e0b;--bl:#3b82f6;--pu:#8b5cf6;--cy:#06b6d4;--or:#f97316;--tl:#14b8a6;--pk:#ec4899}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-height:100dvh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
-.hdr{position:sticky;top:0;z-index:100;background:rgba(10,14,23,.88);backdrop-filter:blur(20px);border-bottom:1px solid var(--bd);padding:0 16px}
-.hi{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:52px}
-.logo{display:flex;align-items:center;gap:8px}.lic{width:28px;height:28px;background:linear-gradient(135deg,var(--gn),var(--cy));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--bg)}.lt{font-size:15px;font-weight:700}
-.hr{display:flex;align-items:center;gap:6px}
-.bdg{display:flex;align-items:center;gap:4px;padding:4px 9px;background:var(--cd);border:1px solid var(--bd);border-radius:14px;font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace}
-.dot{width:6px;height:6px;border-radius:50%}.dot.on{background:var(--gn);animation:p1 2s infinite}.dot.off{background:var(--rd)}.dot.w{background:var(--am);animation:p2 2s infinite}
-@keyframes p1{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}}
-@keyframes p2{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.5)}50%{box-shadow:0 0 0 5px rgba(245,158,11,0)}}
-.btn{padding:6px 12px;border:1px solid var(--bd);border-radius:7px;background:var(--cd);color:var(--t1);font-size:11px;font-weight:600;cursor:pointer;transition:.1s}.btn:active{transform:scale(.97)}
-.btn-g{background:linear-gradient(135deg,var(--gn),#059669);border:none;color:#fff}.btn-g:disabled{opacity:.5}
-.btn-sm{padding:4px 8px;font-size:10px;border-radius:5px}
-.btn-r{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.2)}
-.btn-pu{background:rgba(139,92,246,.12);color:var(--pu);border:1px solid rgba(139,92,246,.2)}
-.mn{max-width:1400px;margin:0 auto;padding:14px}
-.sts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-.st{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px}
-.stl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--t3);margin-bottom:3px}
-.stv{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-1px}
-.sts2{font-size:9px;color:var(--t3);font-family:'JetBrains Mono',monospace}
-/* Index pill row */
-.idx-row{display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap;padding-bottom:6px}
-.idx-btn{padding:5px 11px;border-radius:18px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--cd);color:var(--t3);display:flex;align-items:center;gap:4px;transition:.15s;white-space:nowrap}
-.idx-btn:hover{border-color:var(--bd2);color:var(--t2)}
-.idx-btn.a{color:#fff}
-.idx-btn.a[data-idx="all"]{background:var(--bl);border-color:var(--bl)}
-.idx-btn.a[data-idx="NIFTY 50"]{background:#7c3aed;border-color:#7c3aed}
-.idx-btn.a[data-idx="NIFTY 100"]{background:var(--cy);border-color:var(--cy)}
-.idx-btn.a[data-idx="NIFTY 200"]{background:var(--tl);border-color:var(--tl)}
-.idx-btn.a[data-idx="BSE 100"]{background:var(--or);border-color:var(--or)}
-.idx-btn.a[data-idx="MIDCAP 150"]{background:var(--pk);border-color:var(--pk)}
-.idx-btn.a[data-idx="OTHER NSE"]{background:var(--t3);border-color:var(--t3)}
-.idx-cnt{font-family:'JetBrains Mono',monospace;font-size:9px;opacity:.8}
-/* Signal tabs */
-.tabs{display:flex;gap:2px;background:var(--bg2);padding:3px;border-radius:9px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tab{padding:7px 12px;border-radius:6px;font-size:11px;font-weight:600;color:var(--t3);cursor:pointer;border:none;background:transparent;white-space:nowrap;display:flex;align-items:center;gap:5px;flex-shrink:0}
-.tab.a{background:var(--cd);color:var(--t1);box-shadow:0 2px 6px rgba(0,0,0,.2)}
-.tc{padding:1px 5px;border-radius:7px;font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700}
-.tcg{background:var(--gg);color:var(--gn)}.tcr{background:var(--rg);color:var(--rd)}.tcb{background:rgba(59,130,246,.12);color:var(--bl)}.tcp{background:rgba(139,92,246,.12);color:var(--pu)}
-.srch{position:relative;margin-bottom:12px}.srch input{width:100%;padding:9px 12px 9px 34px;background:var(--cd);border:1px solid var(--bd);border-radius:9px;color:var(--t1);font-size:13px;outline:none}.srch input:focus{border-color:var(--bl)}.srch input::placeholder{color:var(--t3)}.srch::before{content:'⌕';position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:14px}
-.tc2{background:var(--cd);border:1px solid var(--bd);border-radius:11px;overflow:hidden}.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}
-table{width:100%;border-collapse:collapse;font-size:11px}thead{position:sticky;top:0;z-index:5}
-th{padding:9px 10px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);background:var(--bg2);border-bottom:1px solid var(--bd);white-space:nowrap;cursor:pointer}
-td{padding:10px;border-bottom:1px solid rgba(30,41,59,.3);white-space:nowrap;font-family:'JetBrains Mono',monospace;font-size:11px}
-tr{transition:background .1s}tr:active{background:var(--cdh)}
-.sn{font-family:'DM Sans',sans-serif}.sns{font-weight:700;font-size:12px;color:var(--t1)}.snn{font-size:9px;color:var(--t3)}
-.pb{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;background:rgba(139,92,246,.12);color:var(--pu);margin-left:4px}
-.itag{display:inline-block;padding:1px 4px;border-radius:3px;font-size:7px;font-weight:700;margin-left:3px}
-.itag-n50{background:rgba(124,58,237,.15);color:#a78bfa}
-.itag-n100{background:rgba(6,182,212,.15);color:var(--cy)}
-.itag-n200{background:rgba(20,184,166,.15);color:#2dd4bf}
-.itag-bse{background:rgba(249,115,22,.15);color:var(--or)}
-.itag-mid{background:rgba(236,72,153,.15);color:#f472b6}
-.itag-other{background:rgba(100,116,139,.12);color:var(--t3)}
-.score{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;cursor:pointer;display:inline-block;min-width:40px;text-align:center}
-.score-buy{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.25)}.score-buy.strong{background:rgba(16,185,129,.2);box-shadow:0 0 8px rgba(16,185,129,.15)}
-.score-sell{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.25)}
-.ds{display:flex;gap:3px}.d{width:6px;height:6px;border-radius:50%;flex-shrink:0}.d.p{background:var(--rd);box-shadow:0 0 4px rgba(239,68,68,.4)}.d.f{background:var(--t3);opacity:.2}
-.rr{font-size:10px;font-weight:600}.rr-good{color:var(--gn)}.rr-ok{color:var(--am)}.rr-bad{color:var(--rd)}
-.macd-slope{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:3px}
-.slope-up{color:var(--gn)}.slope-dn{color:var(--rd)}.slope-flat{color:var(--t3)}
-.sig{padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.3px}
-.sig-b{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.2)}.sig-mb{background:rgba(6,182,212,.1);color:var(--cy);border:1px solid rgba(6,182,212,.2)}.sig-s{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.2)}.sig-h{background:rgba(100,116,139,.06);color:var(--t3);border:1px solid rgba(100,116,139,.1)}
-/* Modal */
-.mo{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fi .15s}
-@media(min-width:768px){.mo{align-items:center;padding:24px}}@keyframes fi{from{opacity:0}to{opacity:1}}
-.moc{background:var(--cd);border:1px solid var(--bd2);border-radius:14px 14px 0 0;width:100%;max-height:88dvh;overflow-y:auto;animation:su .2s ease}
-@media(min-width:768px){.moc{max-width:680px;border-radius:14px;max-height:85vh}}@keyframes su{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
-.moh{padding:16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:flex-start;position:sticky;top:0;background:var(--cd);z-index:1}
-.mox{width:26px;height:26px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t3);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.mob{padding:16px}
-.ig{display:grid;grid-template-columns:1fr 1fr;gap:8px}@media(max-width:480px){.ig{grid-template-columns:1fr}}
-.ic{background:var(--bg2);border:1px solid var(--bd);border-radius:7px;padding:10px}
-.ich{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
-.ict{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--t2)}
-.ics{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px}.ics.p{background:var(--gg);color:var(--gn)}.ics.f{background:var(--rg);color:var(--rd)}
-.icv{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace}.icd{font-size:9px;color:var(--t3);margin-top:3px}
-.sbar{width:100%;height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden;margin-top:4px}.sbar-f{height:100%;border-radius:4px;transition:width .3s}
-.sr-row{display:flex;gap:10px;margin-top:12px;padding:12px;background:var(--bg2);border:1px solid var(--bd);border-radius:8px}.sr-item{flex:1;text-align:center}.sr-label{font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.4px}.sr-val{font-size:16px;font-weight:800;font-family:'JetBrains Mono',monospace;margin-top:2px}
-/* Watchlist */
-.wl-bar{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
-.wl-chip{padding:5px 12px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(139,92,246,.3);background:rgba(139,92,246,.08);color:var(--pu);display:flex;align-items:center;gap:5px}
-.wl-chip.a{background:var(--pu);color:#fff;border-color:var(--pu)}
-.wl-chip .x{font-size:13px;opacity:.6;cursor:pointer;margin-left:2px}.wl-chip .x:hover{opacity:1}
-.wl-add-btn{padding:5px 10px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px dashed var(--bd2);background:transparent;color:var(--t3)}
-.wl-input{padding:5px 10px;border-radius:16px;font-size:11px;border:1px solid var(--pu);background:var(--bg2);color:var(--t1);outline:none;width:120px}
-/* Scan progress */
-.scan-bar{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px}
-.scan-prog{flex:1;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}.scan-fill{height:100%;background:var(--gn);border-radius:3px;transition:width .5s}
-.scan-txt{font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace;white-space:nowrap}
-/* Setup */
-.setup{text-align:center;padding:50px 20px;max-width:460px;margin:0 auto}.setup h2{font-size:18px;margin:12px 0 8px}.setup p{color:var(--t2);font-size:13px;line-height:1.6;margin-bottom:14px}.setup code{display:block;background:var(--bg2);border:1px solid var(--bd);border-radius:7px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--gn);text-align:left;margin:10px 0;white-space:pre;overflow-x:auto}
-.miss{display:inline-block;padding:2px 8px;border-radius:4px;background:var(--rg);color:var(--rd);font-size:11px;font-weight:600;margin:2px}
-.ld{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 0;color:var(--t3)}
-.sp{width:28px;height:28px;border:3px solid var(--bd);border-top-color:var(--gn);border-radius:50%;animation:spn .7s linear infinite;margin-bottom:10px}@keyframes spn{to{transform:rotate(360deg)}}
-.empty{text-align:center;padding:40px 16px;color:var(--t3)}
-@media(max-width:600px){.sts{grid-template-columns:repeat(2,1fr)}.stv{font-size:17px}.mn{padding:10px}}
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-<script type="text/babel">
-const {useState,useEffect,useCallback,useMemo,useRef}=React;
-const API=window.location.origin;
-const fmt=(n,d=2)=>n!=null?Number(n).toFixed(d):'—';
-const ago=(iso)=>{if(!iso)return'Never';const d=(Date.now()-new Date(iso).getTime())/1e3;if(d<60)return`${Math.floor(d)}s`;if(d<3600)return`${Math.floor(d/60)}m`;return`${Math.floor(d/3600)}h`};
-const ITAG_CLS={"NIFTY 50":"itag-n50","NIFTY 100":"itag-n100","NIFTY 200":"itag-n200","BSE 100":"itag-bse","MIDCAP 150":"itag-mid","OTHER NSE":"itag-other"};
+"""
+SignalScope v3 — Scans ALL NSE equities (~2000 stocks)
+Daily candles, 6 indicators, 100-point weighted scoring.
+Stocks tagged with known indices (NIFTY 50/100/200, BSE 100, Midcap 150)
+or "OTHER NSE" for everything else.
+"""
 
-const IDX_TABS=[
-  {k:'all',l:'All NSE'},
-  {k:'NIFTY 50',l:'NIFTY 50'},
-  {k:'NIFTY 100',l:'NIFTY 100'},
-  {k:'NIFTY 200',l:'NIFTY 200'},
-  {k:'BSE 100',l:'BSE 100'},
-  {k:'MIDCAP 150',l:'Midcap 150'},
-  {k:'OTHER NSE',l:'Other NSE'},
-];
+import os, time, threading, logging
+from datetime import datetime, timedelta
+import numpy as np, pandas as pd, pyotp, requests
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
+from SmartApi import SmartConnect
+from index_data import build_index_map, get_indices_for, INDEX_NAMES, ALL_KNOWN
 
-function loadWL(){try{return JSON.parse(localStorage.getItem('ss_watchlists'))||{}}catch(e){return{}}}
-function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
-function ITags({indices}){if(!indices||!indices.length)return null;return<>{indices.map(i=><span key={i}className={`itag ${ITAG_CLS[i]||'itag-other'}`}>{i}</span>)}</>}
-function SellDots({c}){return<div className="ds">{Object.keys(c).map(k=><div key={k}className={`d ${c[k]?'p':'f'}`}title={k}/>)}</div>}
-function RR({ratio}){if(!ratio||ratio<=0)return<span className="rr rr-bad">—</span>;const cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';return<span className={`rr ${cl}`}>{ratio.toFixed(1)}:1</span>}
-function MACDSlope({slope,phase,curve}){
-  if(slope==null)return<span className="macd-slope slope-flat">—</span>;
-  const phaseColors={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
-  const col=phaseColors[phase]||"var(--t3)";
-  let pathD='';
-  if(curve&&curve.length>2){
-    const w=48,h=18;
-    const pts=curve.map((v,i)=>`${(i/(curve.length-1))*w},${h-v*h}`);
-    pathD=`M${pts.join(' L')}`;
-  }
-  return<div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-    {pathD&&<svg width="48"height="18"viewBox="0 0 48 18"style={{flexShrink:0}}>
-      <line x1="0"y1="9"x2="48"y2="9"stroke="var(--bd2)"strokeWidth="0.5"strokeDasharray="2,2"/>
-      <path d={pathD}fill="none"stroke={col}strokeWidth="1.5"strokeLinecap="round"strokeLinejoin="round"/>
-      <circle cx={48}cy={18-(curve[curve.length-1]||0)*18}r="2"fill={col}/>
-    </svg>}
-    <div style={{display:'flex',flexDirection:'column',gap:'0px'}}>
-      {phase&&<span style={{fontSize:'7px',fontWeight:700,color:col,letterSpacing:'.3px',lineHeight:'1.2'}}>{phase}</span>}
-      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:col}}>{slope>0?'+':''}{slope.toFixed(2)}</span>
-    </div>
-  </div>
+app = Flask(__name__, static_folder=".", static_url_path="")
+CORS(app)
+
+API_KEY    = os.getenv("ANGEL_API_KEY", "")
+CLIENT_ID  = os.getenv("ANGEL_CLIENT_ID", "")
+PASSWORD   = os.getenv("ANGEL_PASSWORD", "")
+TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
+SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
+
+# SCAN_MODE: "top500" (fast ~5min) or "full" (all NSE ~15min)
+scan_mode = os.getenv("SCAN_MODE", "top500").lower()
+
+INDEX_MAP = build_index_map()
+
+smart_api = None
+refresh_token = None
+instrument_list = []       # full list from Angel One
+scan_instrument_list = []  # filtered list based on scan_mode
+is_scanning = False
+abort_scan = False
+credentials_ok = False
+last_login_attempt = 0     # timestamp of last login attempt
+login_backoff = 1          # exponential backoff seconds
+
+# Live scan progress (read by frontend)
+scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "rate_limited": False}
+
+scan_results = {
+    "last_scan": None, "status": "not_started", "total_scanned": 0,
+    "buy_signals": [], "sell_signals": [], "all_stocks": [],
+    "portfolio_holdings": [], "errors": [],
+    "index_counts": {n: 0 for n in INDEX_NAMES},
 }
 
-function Modal({s,onClose,watchlists,onAddToWL}){
-  if(!s)return null;
-  const bb=s.buy_breakdown||{};const sc=s.sell_conditions||{};
-  const indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv"];
-  const sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI ≥ 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope ↓',d:'Slope flipped negative'}];
-  const wlNames=Object.keys(watchlists);
-  return<div className="mo"onClick={onClose}><div className="moc"onClick={e=>e.stopPropagation()}>
-    <div className="moh"><div>
-      <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}}>
-        <span style={{fontSize:'17px',fontWeight:800}}>{s.name}</span>
-        <span style={{fontSize:'11px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}}>{s.symbol}</span>
-        {s.in_portfolio&&<span className="pb">HELD</span>}
-      </div>
-      <div style={{marginTop:'2px'}}><ITags indices={s.indices}/></div>
-      <div style={{marginTop:'4px',fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}>₹{fmt(s.price)}</div>
-      {wlNames.length>0&&<div style={{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'}}>
-        {wlNames.map(wn=>{const inIt=watchlists[wn]?.includes(s.symbol);
-          return<button key={wn}className={`btn btn-sm ${inIt?'btn-r':'btn-pu'}`}onClick={e=>{e.stopPropagation();onAddToWL(wn,s.symbol,!inIt)}}>{inIt?`✕ ${wn}`:`+ ${wn}`}</button>
-        })}
-      </div>}
-    </div><button className="mox"onClick={onClose}>✕</button></div>
-    <div className="mob">
-      <div style={{display:'flex',gap:'10px',marginBottom:'16px'}}>
-        <div style={{flex:1,padding:'14px',background:'var(--gg)',borderRadius:'8px',textAlign:'center'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--gn)',letterSpacing:'.5px'}}>BUY SCORE</div>
-          <div style={{fontSize:'36px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--gn)'}}>{s.buy_score}</div>
-          <div style={{fontSize:'10px',color:'var(--gn)',fontWeight:600}}>{s.buy_signal}</div>
-        </div>
-        <div style={{flex:1,padding:'14px',background:'var(--rg)',borderRadius:'8px',textAlign:'center'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--rd)',letterSpacing:'.5px'}}>SELL</div>
-          <div style={{fontSize:'36px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--rd)'}}>{s.sell_count}</div>
-          <SellDots c={sc}/>
-        </div>
-      </div>
-      <div className="sr-row">
-        <div className="sr-item"><div className="sr-label">Support</div><div className="sr-val"style={{color:'var(--gn)'}}>₹{fmt(s.support)}</div></div>
-        <div className="sr-item"><div className="sr-label">Resistance</div><div className="sr-val"style={{color:'var(--rd)'}}>₹{fmt(s.resistance)}</div></div>
-        <div className="sr-item"><div className="sr-label">R:R</div><div className="sr-val"><RR ratio={s.rr_ratio}/></div></div>
-      </div>
-      {/* MACD Momentum Phase */}
-      {(()=>{
-        const phC={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
-        const pc=phC[s.macd_phase]||"var(--t3)";
-        return<div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'6px'}}>MACD MOMENTUM ANALYSIS</div>
-          {(()=>{
-            const cv=s.macd_curve||[];
-            if(cv.length<3)return null;
-            const w=260,h=50;
-            const pts=cv.map((v,i)=>`${(i/(cv.length-1))*w},${h-v*h}`);
-            const pathD=`M${pts.join(' L')}`;
-            // Zero line position (find where normalised value maps to 0)
-            return<svg width="100%"height="50"viewBox={`0 0 ${w} ${h}`}preserveAspectRatio="none"style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.2)'}}>
-              <line x1="0"y1={h/2}x2={w}y2={h/2}stroke="var(--bd2)"strokeWidth="0.5"strokeDasharray="3,3"/>
-              <path d={pathD}fill="none"stroke={pc}strokeWidth="2"strokeLinecap="round"strokeLinejoin="round"/>
-              <circle cx={w}cy={h-(cv[cv.length-1]||0)*h}r="3"fill={pc}/>
-            </svg>
-          })()}
-          <div style={{display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
-            <div style={{padding:'6px 14px',background:pc+'18',borderRadius:'6px',border:`1px solid ${pc}40`}}>
-              <div style={{fontSize:'14px',fontWeight:800,color:pc}}>{s.macd_phase||'—'}</div>
-            </div>
-            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d(MACD)/dt</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_slope>0?'var(--gn)':s.macd_slope<0?'var(--rd)':'var(--t3)'}}>{s.macd_slope!=null?(s.macd_slope>0?'+':'')+s.macd_slope.toFixed(4):'—'}</div></div>
-            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d²(MACD)/dt²</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_accel>0?'var(--gn)':s.macd_accel<0?'var(--rd)':'var(--t3)'}}>{s.macd_accel!=null?(s.macd_accel>0?'+':'')+s.macd_accel.toFixed(4):'—'}</div></div>
-          </div>
-          <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
-            {s.macd_phase==='BUY FLIP'&&'Slope just crossed zero upward — momentum confirmed bullish'}
-            {s.macd_phase==='EARLY BUY'&&'Decline decelerating (d²>0 while d<0) — potential bottom forming'}
-            {s.macd_phase==='SELL FLIP'&&'Slope just crossed zero downward — momentum confirmed bearish'}
-            {s.macd_phase==='EARLY SELL'&&'Rise decelerating (d²<0 while d>0) — potential top forming'}
-            {s.macd_phase==='BULLISH'&&'Rising momentum with positive acceleration — strong uptrend'}
-            {s.macd_phase==='BEARISH'&&'Falling momentum with negative acceleration — strong downtrend'}
-          </div>
-        </div>
-      })()}
-      <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
-      <div className="ig"style={{marginBottom:'16px'}}>{indicators.map(k=>{const b=bb[k];if(!b)return null;const pct=b.max>0?(b.pts/b.max*100):0;
-        return<div className="ic"key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={`ics ${b.pass?'p':'f'}`}>{b.pts}/{b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f"style={{width:`${pct}%`,background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
-      })}</div>
-      <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--rd)',marginBottom:'8px'}}>SELL INDICATORS</h3>
-      <div className="ig">{sellI.map(i=><div className="ic"key={i.k}><div className="ich"><span className="ict">{i.t}</span><span className={`ics ${sc[i.k]?'p':'f'}`}>{sc[i.k]?'✓':'✗'}</span></div><div className="icd">{i.d}</div></div>)}</div>
-    </div>
-  </div></div>
-}
+# ═══════════════════════════════════════════════════════════════
+# AUTH
+# ═══════════════════════════════════════════════════════════════
 
-function App(){
-  const[data,setData]=useState(null);const[status,setStatus]=useState(null);const[loading,setLoading]=useState(true);
-  const[progress,setProgress]=useState(null);
-  const[idxFilter,setIdxFilter]=useState('all');
-  const[tab,setTab]=useState('all');const[search,setSearch]=useState('');const[sortK,setSortK]=useState('buy_score');const[sortA,setSortA]=useState(false);const[sel,setSel]=useState(null);
-  const[watchlists,setWatchlists]=useState(loadWL);
-  const[activeWL,setActiveWL]=useState(null);
-  const[addingWL,setAddingWL]=useState(false);
-  const[newWLName,setNewWLName]=useState('');
-  const inputRef=useRef(null);
+def check_credentials():
+    missing = []
+    if not API_KEY: missing.append("ANGEL_API_KEY")
+    if not CLIENT_ID: missing.append("ANGEL_CLIENT_ID")
+    if not PASSWORD: missing.append("ANGEL_PASSWORD")
+    if not TOTP_TOKEN: missing.append("ANGEL_TOTP_TOKEN")
+    return missing
 
-  const setAndSaveWL=(w)=>{setWatchlists(w);saveWL(w)};
-  const createWL=(name)=>{if(!name.trim())return;const w={...watchlists,[name.trim()]:[]};setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
-  const deleteWL=(name)=>{const w={...watchlists};delete w[name];setAndSaveWL(w);if(activeWL===name){setActiveWL(null);setIdxFilter('all')}};
-  const toggleInWL=(wlName,symbol,add)=>{const w={...watchlists};if(!w[wlName])w[wlName]=[];if(add&&!w[wlName].includes(symbol))w[wlName].push(symbol);if(!add)w[wlName]=w[wlName].filter(s=>s!==symbol);setAndSaveWL(w)};
+def create_session():
+    global smart_api, refresh_token, credentials_ok, last_login_attempt, login_backoff
+    try:
+        smart_api = SmartConnect(api_key=API_KEY)
+        totp = pyotp.TOTP(TOTP_TOKEN).now()
+        data = smart_api.generateSession(CLIENT_ID, PASSWORD, totp)
+        if not data or data.get("status") is False:
+            logger.error(f"Login failed: {data}")
+            credentials_ok = False
+            return False
+        refresh_token = data["data"]["refreshToken"]
+        credentials_ok = True
+        login_backoff = 1  # reset backoff on success
+        logger.info("Logged in to Angel One")
+        return True
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        credentials_ok = False
+        return False
 
-  useEffect(()=>{if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
+def ensure_session():
+    """Re-login if needed, with exponential backoff to avoid rate limit spiral."""
+    global last_login_attempt, login_backoff, scan_progress
+    if smart_api is None:
+        return create_session()
+    try:
+        smart_api.getProfile(refresh_token)
+        return True
+    except:
+        # Check cooldown — don't spam login attempts
+        now = time.time()
+        if now - last_login_attempt < login_backoff:
+            return False  # still cooling down
+        last_login_attempt = now
+        result = create_session()
+        if not result:
+            # Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 60s
+            login_backoff = min(login_backoff * 2, 60)
+            scan_progress["rate_limited"] = True
+            logger.warning(f"Login failed, backing off {login_backoff}s")
+        else:
+            login_backoff = 1
+            scan_progress["rate_limited"] = False
+        return result
 
-  const fetchAll=useCallback(async()=>{try{const[r1,r2,r3]=await Promise.all([fetch(`${API}/api/results`),fetch(`${API}/api/status`),fetch(`${API}/api/progress`)]);setData(await r1.json());setStatus(await r2.json());setProgress(await r3.json())}catch(e){}finally{setLoading(false)}},[]);
-  useEffect(()=>{fetchAll();const t=setInterval(fetchAll,isSc?5000:15000);return()=>clearInterval(t)},[fetchAll,isSc]);
-  const[scanError,setScanError]=useState(null);
+# ═══════════════════════════════════════════════════════════════
+# INSTRUMENTS — ALL NSE EQUITIES
+# ═══════════════════════════════════════════════════════════════
 
-  const triggerScan=async()=>{
-    setScanError(null);
-    try{
-      const r=await fetch(`${API}/api/scan`,{method:'POST'});
-      const j=await r.json();
-      if(!r.ok){setScanError(j.error||'Scan failed');return}
-      fetchAll();
-    }catch(e){setScanError('Network error')}
-  };
-  const reconnect=async()=>{
-    setScanError(null);
-    try{
-      const r=await fetch(`${API}/api/reconnect`,{method:'POST'});
-      const j=await r.json();
-      if(!r.ok){setScanError(j.error||'Reconnect failed');return}
-      setScanError(null);
-      fetchAll();
-    }catch(e){setScanError('Network error')}
-  };
-  const stopScan=async()=>{
-    try{await fetch(`${API}/api/stop`,{method:'POST'});setTimeout(fetchAll,1000)}catch(e){}
-  };
-  const resetAndRescan=async()=>{
-    setScanError(null);
-    try{
-      const r=await fetch(`${API}/api/reset`,{method:'POST'});
-      const j=await r.json();
-      if(!r.ok){setScanError(j.error||'Reset failed');return}
-      fetchAll();
-      // Auto-trigger new scan after reset
-      setTimeout(async()=>{
-        await fetch(`${API}/api/scan`,{method:'POST'});
-        fetchAll();
-      },500);
-    }catch(e){setScanError('Network error')}
-  };
-  const toggleScanMode=async()=>{
-    const newMode=status?.scan_mode==='top500'?'full':'top500';
-    try{await fetch(`${API}/api/scan_mode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:newMode})});fetchAll()}catch(e){}
-  };
-  const doSort=(k)=>{if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
+def fetch_instrument_list():
+    """Download ALL NSE equities, then apply scan_mode filter."""
+    global instrument_list, scan_instrument_list
+    try:
+        url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+        logger.info("Downloading instrument list...")
+        resp = requests.get(url, timeout=120)
+        all_inst = resp.json()
 
-  const stocks=useMemo(()=>{
-    if(!data)return[];
-    let l=tab==='buy'?data.buy_signals||[]:tab==='sell'?data.sell_signals||[]:tab==='port'?(data.all_stocks||[]).filter(s=>s.in_portfolio):data.all_stocks||[];
-    if(idxFilter==='watchlist'&&activeWL){
-      const syms=watchlists[activeWL]||[];
-      l=(data.all_stocks||[]).filter(s=>syms.includes(s.symbol));
-    }else if(idxFilter!=='all'){
-      l=l.filter(s=>s.indices&&s.indices.includes(idxFilter));
+        # Full NSE equity list (always kept for switching modes without re-download)
+        instrument_list = [
+            i for i in all_inst
+            if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")
+        ]
+        logger.info(f"Total NSE equities: {len(instrument_list)}")
+
+        apply_scan_mode()
+        return True
+    except Exception as e:
+        logger.error(f"Instrument fetch failed: {e}")
+        return False
+
+
+def apply_scan_mode():
+    """Filter instrument_list based on scan_mode. Known index stocks always come first."""
+    global scan_instrument_list
+    known = ALL_KNOWN
+    known_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") in known]
+    other_list = [i for i in instrument_list if i["symbol"].replace("-EQ","") not in known]
+
+    if scan_mode == "full":
+        # Scan ALL but known stocks first so you get useful results early
+        scan_instrument_list = known_list + other_list
+        logger.info(f"Scan mode: FULL — {len(scan_instrument_list)} stocks ({len(known_list)} indexed first)")
+    else:
+        # Top 500: known + next ~200 unknowns
+        extra = other_list[:max(0, 500 - len(known_list))]
+        scan_instrument_list = known_list + extra
+        logger.info(f"Scan mode: TOP500 — {len(scan_instrument_list)} stocks ({len(known_list)} indexed + {len(extra)} other)")
+
+# ═══════════════════════════════════════════════════════════════
+# DATA FETCH
+# ═══════════════════════════════════════════════════════════════
+
+RATE_LIMITED = "RATE_LIMITED"  # sentinel value
+
+def fetch_candle_data(symbol_token):
+    """Fetch 365 days of daily candles. Returns DataFrame, None (no data), or RATE_LIMITED."""
+    if not ensure_session(): return RATE_LIMITED
+    try:
+        to_d = datetime.now()
+        from_d = to_d - timedelta(days=365)
+        resp = smart_api.getCandleData({
+            "exchange": "NSE", "symboltoken": str(symbol_token),
+            "interval": "ONE_DAY",
+            "fromdate": from_d.strftime("%Y-%m-%d %H:%M"),
+            "todate": to_d.strftime("%Y-%m-%d %H:%M"),
+        })
+        if resp and resp.get("status") and resp.get("data"):
+            df = pd.DataFrame(resp["data"], columns=["DateTime","Open","High","Low","Close","Volume"])
+            df["DateTime"] = pd.to_datetime(df["DateTime"])
+            df.set_index("DateTime", inplace=True)
+            return df
+        # API responded but no data — stock is just thinly traded, NOT rate limited
+        return None
+    except Exception as e:
+        err_str = str(e)
+        if "access rate" in err_str.lower() or "rate" in err_str.lower():
+            logger.warning(f"Rate limited on {symbol_token}")
+            return RATE_LIMITED
+        logger.debug(f"Candle error {symbol_token}: {e}")
+        return None
+
+def fetch_portfolio():
+    if not ensure_session(): return []
+    try:
+        result = smart_api.holding()
+        if result and result.get("status") and result.get("data"):
+            return [{"symbol": h.get("tradingsymbol",""), "token": h.get("symboltoken",""),
+                      "quantity": h.get("quantity",0), "avg_price": float(h.get("averageprice",0)),
+                      "ltp": float(h.get("ltp",0)), "pnl": float(h.get("profitandloss",0))}
+                     for h in result["data"]]
+        return []
+    except Exception as e:
+        logger.error(f"Portfolio error: {e}")
+        return []
+
+# ═══════════════════════════════════════════════════════════════
+# TECHNICAL INDICATORS
+# ═══════════════════════════════════════════════════════════════
+
+def calc_sma(s, p): return s.rolling(window=p, min_periods=p).mean()
+
+def calc_rsi(s, p=14):
+    d = s.diff(); g = d.where(d>0,0.0); l = -d.where(d<0,0.0)
+    ag = g.ewm(com=p-1,min_periods=p).mean(); al = l.ewm(com=p-1,min_periods=p).mean()
+    return 100 - (100/(1+ag/al))
+
+def calc_bb(s, p=20, sd=2):
+    m = calc_sma(s,p); st = s.rolling(window=p,min_periods=p).std()
+    return m, m+sd*st, m-sd*st
+
+def calc_macd(s, f=12, sl=26, sg=9):
+    ef = s.ewm(span=f,adjust=False).mean(); es = s.ewm(span=sl,adjust=False).mean()
+    ml = ef-es; sig = ml.ewm(span=sg,adjust=False).mean()
+    return ml, sig, ml-sig
+
+def calc_obv(close, vol):
+    r = pd.Series(index=close.index, dtype=float); r.iloc[0] = 0
+    for i in range(1,len(close)):
+        if close.iloc[i]>close.iloc[i-1]: r.iloc[i]=r.iloc[i-1]+vol.iloc[i]
+        elif close.iloc[i]<close.iloc[i-1]: r.iloc[i]=r.iloc[i-1]-vol.iloc[i]
+        else: r.iloc[i]=r.iloc[i-1]
+    return r
+
+def calc_adx(high, low, close, p=14):
+    pdf = pd.DataFrame({"ph": high.diff(), "pl": low.shift(1) - low})
+    pdf["plus_dm"] = pdf.apply(lambda r: r["ph"] if r["ph"] > r["pl"] and r["ph"] > 0 else 0, axis=1)
+    pdf["minus_dm"] = pdf.apply(lambda r: r["pl"] if r["pl"] > r["ph"] and r["pl"] > 0 else 0, axis=1)
+    tr1 = high - low; tr2 = (high - close.shift(1)).abs(); tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.ewm(span=p, adjust=False).mean()
+    plus_di = 100 * (pdf["plus_dm"].ewm(span=p, adjust=False).mean() / atr)
+    minus_di = 100 * (pdf["minus_dm"].ewm(span=p, adjust=False).mean() / atr)
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    return dx.ewm(span=p, adjust=False).mean()
+
+def find_support_resistance(high, low, close, lookback=60):
+    price = close.iloc[-1]
+    rh, rl, rc = high.iloc[-lookback:], low.iloc[-lookback:], close.iloc[-lookback:]
+    swing_highs, swing_lows = [], []
+    for i in range(2, len(rh)-2):
+        if rh.iloc[i]>rh.iloc[i-1] and rh.iloc[i]>rh.iloc[i-2] and rh.iloc[i]>rh.iloc[i+1] and rh.iloc[i]>=rh.iloc[i+2]:
+            swing_highs.append(rh.iloc[i])
+        if rl.iloc[i]<rl.iloc[i-1] and rl.iloc[i]<rl.iloc[i-2] and rl.iloc[i]<rl.iloc[i+1] and rl.iloc[i]<=rl.iloc[i+2]:
+            swing_lows.append(rl.iloc[i])
+    pivot = (rh.iloc[-1]+rl.iloc[-1]+rc.iloc[-1])/3
+    r1, s1 = 2*pivot-rl.iloc[-1], 2*pivot-rh.iloc[-1]
+    r2, s2 = pivot+(rh.iloc[-1]-rl.iloc[-1]), pivot-(rh.iloc[-1]-rl.iloc[-1])
+    res = sorted(set([r1,r2]+[h for h in swing_highs if h>price]))
+    sup = sorted(set([s1,s2]+[l for l in swing_lows if l<price]), reverse=True)
+    support = next((s for s in sup if s<price), rl.min())
+    resistance = next((r for r in res if r>price), rh.max())
+    return round(float(support),2), round(float(resistance),2)
+
+# ═══════════════════════════════════════════════════════════════
+# ANALYZE — 100pt WEIGHTED SCORING
+# ═══════════════════════════════════════════════════════════════
+
+def analyze_stock(df):
+    if df is None or len(df) < 50: return None
+    close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
+    n_candles = len(df)
+    price = close.iloc[-1]
+    ok = lambda v: not pd.isna(v)
+    sf = lambda v, d=2: round(float(v),d) if ok(v) else None
+
+    # SMA(200) — only calculate if we have enough data
+    s200 = calc_sma(close,200).iloc[-1] if n_candles >= 200 else np.nan
+
+    r14 = calc_rsi(close,14).iloc[-1]
+    bm,bu,bl = calc_bb(close,20,2)
+    ml,ms,mh = calc_macd(close)
+    ov = calc_obv(close,vol)
+    adx_s = calc_adx(high,low,close,14)
+
+    cbm,cbu,cbl = bm.iloc[-1],bu.iloc[-1],bl.iloc[-1]
+    cm,cms,cmh = ml.iloc[-1],ms.iloc[-1],mh.iloc[-1]
+
+    # ── MACD Derivatives (d/dt and d²/dt²) ──
+    # First derivative: slope of MACD line (velocity of momentum)
+    cm_prev = ml.iloc[-2] if len(ml)>=2 else cm
+    cm_prev2 = ml.iloc[-3] if len(ml)>=3 else cm_prev
+    macd_slope = float(cm - cm_prev) if ok(cm) and ok(cm_prev) else 0      # d(MACD)/dt
+    macd_slope_prev = float(cm_prev - cm_prev2) if ok(cm_prev) and ok(cm_prev2) else 0
+    # Second derivative: rate of change of slope (acceleration of momentum)
+    macd_accel = macd_slope - macd_slope_prev  # d²(MACD)/dt²
+
+    # ── Momentum Phase Detection ──
+    # Phase 1 (EARLY BUY):  slope < 0 but accel > 0  → decline slowing, about to flip
+    # Phase 2 (BUY CONFIRM): slope crosses 0 from below (was neg, now pos)
+    # Phase 3 (EARLY SELL):  slope > 0 but accel < 0  → rise slowing, about to flip
+    # Phase 4 (SELL CONFIRM): slope crosses 0 from above (was pos, now neg)
+    slope_cross_up = bool(macd_slope > 0 and macd_slope_prev <= 0)   # just flipped positive
+    slope_cross_dn = bool(macd_slope < 0 and macd_slope_prev >= 0)   # just flipped negative
+    early_buy = bool(macd_slope < 0 and macd_accel > 0)              # decline decelerating
+    early_sell = bool(macd_slope > 0 and macd_accel < 0)             # rise decelerating
+
+    if slope_cross_up:
+        macd_phase = "BUY FLIP"
+    elif early_buy:
+        macd_phase = "EARLY BUY"
+    elif slope_cross_dn:
+        macd_phase = "SELL FLIP"
+    elif early_sell:
+        macd_phase = "EARLY SELL"
+    elif macd_slope > 0 and macd_accel >= 0:
+        macd_phase = "BULLISH"
+    elif macd_slope < 0 and macd_accel <= 0:
+        macd_phase = "BEARISH"
+    else:
+        macd_phase = "NEUTRAL"
+    co = ov.iloc[-1]
+    co5 = ov.iloc[-5] if len(ov)>=5 else ov.iloc[0]
+    co20 = ov.iloc[-20] if len(ov)>=20 else ov.iloc[0]
+    curr_adx = adx_s.iloc[-1] if len(adx_s)>0 and ok(adx_s.iloc[-1]) else 0
+    tlb = any(close.iloc[i]<=bl.iloc[i] for i in range(-5,0) if ok(bl.iloc[i]))
+    abm = bool(price<=cbm) if ok(cbm) else False
+
+    support, resistance = find_support_resistance(high,low,close, min(60, n_candles - 5))
+    risk = round(price-support,2) if support else 0
+    reward = round(resistance-price,2) if resistance else 0
+    rr_ratio = round(reward/risk,2) if risk>0 else 0
+
+    # MACD zero-cross detection: MACD just turned positive from ≤0
+    cm_prev_val = ml.iloc[-2] if len(ml) >= 2 else 0
+    macd_zero_cross_up = bool(ok(cm) and cm > 0 and cm < 0.15 and ok(cm_prev_val) and cm_prev_val <= 0)
+
+    # Mini MACD curve (last 20 values, normalised for sparkline)
+    macd_curve = []
+    n_curve = min(20, len(ml))
+    if n_curve > 2:
+        raw = [float(ml.iloc[-n_curve + j]) for j in range(n_curve) if ok(ml.iloc[-n_curve + j])]
+        if raw:
+            mn, mx = min(raw), max(raw)
+            rng = mx - mn if mx != mn else 1
+            macd_curve = [round((v - mn) / rng, 3) for v in raw]
+
+    # ══════════════════════════════════════════════════════════
+    # BUY SCORE — Revised Weights (max ~110 with all bonuses)
+    # ══════════════════════════════════════════════════════════
+    buy_score = 0; buy_breakdown = {}
+
+    # 1. SMA(200) — 25 pts
+    sma_p = bool(price > s200) if ok(s200) else False
+    sma_pts = 25 if sma_p else 0; buy_score += sma_pts
+    sma_desc = "Close > SMA(200)" if ok(s200) else f"N/A ({n_candles} candles < 200)"
+    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": 25,
+                                "val": sf(s200), "desc": sma_desc}
+
+    # 2. MACD INFLECTION — 30 pts (★ highest weight)
+    #    Best case: MACD just crossed zero up (0 < MACD < 0.15) AND d²/dt² > 0
+    #    Good case: slope just flipped positive
+    #    Early case: decline decelerating (d²/dt² > 0 while d/dt < 0)
+    macd_inf_pts = 0
+    macd_inf_desc = ""
+    if macd_zero_cross_up and macd_accel > 0:
+        macd_inf_pts = 30
+        macd_inf_desc = "MACD crossed 0↑ + accel ↑ (PRIME ENTRY)"
+    elif slope_cross_up:
+        macd_inf_pts = 20
+        macd_inf_desc = "Slope flipped positive ↑"
+    elif early_buy:
+        macd_inf_pts = 10
+        macd_inf_desc = "Decline slowing (d²>0, d<0)"
+    macd_inf_pass = macd_inf_pts > 0
+    buy_score += macd_inf_pts
+    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts, "max": 30,
+                                         "val": sf(macd_slope, 4), "desc": macd_inf_desc or "No inflection detected"}
+
+    # 3. RSI(14) — 15 pts + 5 bonus
+    rsi_p = bool(30 < r14 <= 45) if ok(r14) else False
+    rsi_deep = bool(r14 <= 35) if ok(r14) else False
+    rsi_pts = (15 + (5 if rsi_deep else 0)) if rsi_p else 0; buy_score += rsi_pts
+    buy_breakdown["rsi"] = {"pass": rsi_p, "pts": rsi_pts, "max": 20,
+                             "val": sf(r14), "desc": "RSI 30-45" + (" +bonus ≤35" if rsi_deep else "")}
+
+    # 4. Bollinger Bands — 10 pts + 5 bonus
+    bb_p = bool(abm or tlb) if ok(cbm) else False
+    bb_pts = (10 + (5 if tlb else 0)) if bb_p else 0; buy_score += bb_pts
+    buy_breakdown["bollinger"] = {"pass": bb_p, "pts": bb_pts, "max": 15,
+                                   "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
+
+    # 5. ADX(14) — 10 pts + 5 bonus
+    adx_p = bool(curr_adx > 25); adx_str = bool(curr_adx > 30)
+    adx_pts = (10 + (5 if adx_str else 0)) if adx_p else 0; buy_score += adx_pts
+    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 15,
+                             "val": sf(curr_adx), "desc": "ADX > 25" + (" +bonus >30" if adx_str else "")}
+
+    # 6. OBV — 5 pts
+    obv_p = bool(co > co5 and co > co20)
+    obv_pts = 5 if obv_p else 0; buy_score += obv_pts
+    buy_breakdown["obv"] = {"pass": obv_p, "pts": obv_pts, "max": 5,
+                             "val": sf(co, 0), "desc": "OBV rising vs 5d & 20d"}
+
+    buy_signal = "STRONG BUY" if buy_score >= 75 else ("MODERATE BUY" if buy_score >= 60 else "NO SIGNAL")
+
+    sell_c = {
+        "trend_break": bool(price<s200) if ok(s200) else False,
+        "momentum_reversal": bool(r14>=65) if ok(r14) else False,
+        "volatility_extreme": bool(price>=cbu) if ok(cbu) else False,
+        "momentum_fade": bool(cm<cms and cmh<0) if ok(cm) and ok(cms) else False,
+        "volume_weakness": bool(co<co5),
+        "macd_slope_flip": slope_cross_dn,
     }
-    if(search){const q=search.toLowerCase();l=l.filter(s=>s.symbol.toLowerCase().includes(q)||s.name.toLowerCase().includes(q))}
-    return[...l].sort((a,b)=>{const va=a[sortK],vb=b[sortK];if(va==null)return 1;if(vb==null)return-1;return sortA?(va>vb?1:-1):(va<vb?1:-1)})
-  },[data,idxFilter,activeWL,watchlists,tab,search,sortK,sortA]);
+    sell_count = sum(sell_c.values())
 
-  const filteredCounts=useMemo(()=>{
-    if(!data)return{all:0,buy:0,sell:0,port:0};
-    const f=s=>{
-      if(idxFilter==='watchlist'&&activeWL)return(watchlists[activeWL]||[]).includes(s.symbol);
-      if(idxFilter!=='all')return s.indices&&s.indices.includes(idxFilter);
-      return true;
-    };
-    return{all:(data.all_stocks||[]).filter(f).length,buy:(data.buy_signals||[]).filter(f).length,sell:(data.sell_signals||[]).filter(f).length,port:(data.all_stocks||[]).filter(s=>s.in_portfolio&&f(s)).length}
-  },[data,idxFilter,activeWL,watchlists]);
+    return {
+        "price":sf(price),"sma200":sf(s200),"rsi":sf(r14),
+        "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
+        "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
+        "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),
+        "macd_phase":macd_phase,"macd_curve":macd_curve,
+        "obv":sf(co,0),"adx":sf(curr_adx),
+        "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
+        "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
+        "sell_conditions":sell_c,"sell_count":f"{sell_count}/6","sell_pct":sell_count/6*100,
+        "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,"is_sell":sell_count>=3,
+    }
 
-  if(loading)return<div className="ld"><div className="sp"/>Connecting...</div>;
-  if(status&&!status.connected&&status.missing?.length>0){
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="bdg"><div className="dot off"/>OFFLINE</div></div></header><main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>🔐</div><h2>Credentials Required</h2><div>{status.missing.map(m=><span key={m}className="miss">{m}</span>)}</div><code>{`ANGEL_API_KEY=your_key\nANGEL_CLIENT_ID=your_id\nANGEL_PASSWORD=your_pin\nANGEL_TOTP_TOKEN=your_totp`}</code></div></main></>;
-  }
+# ═══════════════════════════════════════════════════════════════
+# SCAN — ALL NSE EQUITIES
+# ═══════════════════════════════════════════════════════════════
 
-  const nT=data?.total_scanned||0;
-  const isSc=data?.status==='scanning'||status?.is_scanning;
-  const instCount=status?.instruments_scan||status?.instruments||0;
-  const curMode=status?.scan_mode||'top500';
+def run_full_scan():
+    global scan_results, is_scanning, scan_progress, abort_scan
+    if not credentials_ok:
+        logger.error("Cannot scan — not logged in")
+        return
+    if is_scanning: return
+    is_scanning = True
+    abort_scan = False
+    scan_results["status"] = "scanning"
 
-  if(!data||!data.last_scan||nT===0){
-    const isConn=status?.connected;
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr">
-      <div className="bdg"><div className={`dot ${isSc?'w':isConn?'on':'off'}`}/>{isSc?'SCANNING':isConn?'READY':'OFFLINE'}</div>
-      {!isSc&&isConn&&<button className="btn btn-g"onClick={triggerScan}>▶ Scan</button>}
-      {!isConn&&<button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button>}
-    </div></div></header>
-    <main className="mn"><div className="setup">
-      <div style={{fontSize:'40px'}}>{isSc?'⏳':isConn?'📊':'🔌'}</div>
-      <h2>{isSc?'Scanning...':isConn?'Ready to scan':'Connection failed'}</h2>
-      {!isConn&&!isSc&&<p style={{color:'var(--rd)'}}>Could not connect to Angel One. This usually happens if the API timed out or you were rate-limited. Click Reconnect to try again.</p>}
-      {isConn&&!isSc&&<p>Choose scan mode, then tap Scan.</p>}
-      {scanError&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'380px'}}>{scanError}</div>}
-      {!isSc&&isConn&&<div style={{display:'flex',gap:'8px',justifyContent:'center',marginBottom:'16px'}}>
-        <button className={`btn ${curMode==='top500'?'btn-g':''}`}onClick={()=>{if(curMode!=='top500')toggleScanMode()}} style={{minWidth:'110px'}}>Top 500 <span style={{fontSize:'9px',opacity:.7}}>~5min</span></button>
-        <button className={`btn ${curMode==='full'?'btn-g':''}`}onClick={()=>{if(curMode!=='full')toggleScanMode()}} style={{minWidth:'110px'}}>All NSE <span style={{fontSize:'9px',opacity:.7}}>~15min</span></button>
-      </div>}
-      {!isConn&&!isSc&&<div style={{marginTop:'12px'}}><button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000',padding:'10px 24px',fontSize:'13px'}}>🔌 Reconnect to Angel One</button></div>}
-      {isSc&&(()=>{
-        const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
-        return<>
-          <div style={{width:'80%',maxWidth:'300px',margin:'16px auto'}}>
-            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'4px'}}>
-              <span style={{fontSize:'11px',color:'var(--t2)',fontFamily:"'JetBrains Mono'"}}>{p.current||0}/{p.total||'?'}</span>
-              <span style={{fontSize:'11px',color:'var(--gn)',fontFamily:"'JetBrains Mono'"}}>{pct}%</span>
-            </div>
-            <div className="scan-prog"style={{height:'8px'}}><div className="scan-fill"style={{width:`${pct}%`}}/></div>
-            {p.ok>0&&<p style={{fontSize:'10px',color:'var(--t3)',marginTop:'6px'}}>{p.ok} stocks analyzed · {p.errors||0} skipped</p>}
-          </div>
-          {p.rate_limited&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'340px'}}>⚠ Rate limited by Angel One. Scan aborted. Wait ~1 min and retry.</div>}
-        </>
-      })()}
-    </div></main></>;
-  }
+    total = len(scan_instrument_list)
+    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
+    logger.info(f"Starting scan ({scan_mode.upper()}): {total} stocks...")
+    t0 = time.time()
+    buys, sells, all_s, errs = [], [], [], []
 
-  const nB=(data.buy_signals||[]).length,nS=(data.sell_signals||[]).length,nP=(data.portfolio_holdings||[]).length;
-  const ic=data.index_counts||{};
-  const wlNames=Object.keys(watchlists);
-  const scanDur=data.scan_duration_sec?`${(data.scan_duration_sec/60).toFixed(0)}m`:'';
-  const curMode2=status?.scan_mode||'top500';
-  const scanCount=status?.instruments_scan||nT;
-  return<>
-    <header className="hdr"><div className="hi">
-      <div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div>
-      <div className="hr">
-        <button className="bdg"onClick={toggleScanMode}style={{cursor:'pointer',border:curMode2==='full'?'1px solid var(--am)':'1px solid var(--bd)'}}>
-          {curMode2==='top500'?'TOP 500':'ALL NSE'}<span style={{fontSize:'8px',opacity:.6,marginLeft:'2px'}}>{scanCount}</span>
-        </button>
-        <div className="bdg"><div className={`dot ${isSc?'w':'on'}`}/>{isSc?'SCANNING':'LIVE'}</div>
-        <div className="bdg">{ago(data.last_scan)}{scanDur&&` · ${scanDur}`}</div>
-        {isSc?<button className="btn btn-r"onClick={stopScan}>⏹ Stop</button>
-        :<button className="btn btn-g"onClick={triggerScan}>▶</button>}
-        <button className="btn"onClick={resetAndRescan}style={{background:'rgba(249,115,22,.15)',color:'var(--or)',border:'1px solid rgba(249,115,22,.25)'}}>↻ Reset</button>
-      </div>
-    </div></header>
-    <main className="mn">
-      {/* Stats */}
-      {scanError&&<div style={{padding:'8px 14px',background:'var(--rg)',borderRadius:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600,marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>{scanError}</span><button className="btn btn-sm"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button></div>}
-      <div className="sts">
-        <div className="st"><div className="stl">All NSE</div><div className="stv"style={{color:'var(--bl)'}}>{nT.toLocaleString()}</div><div className="sts2">{(data.errors||[]).length} skipped</div></div>
-        <div className="st"><div className="stl">Buy Signals</div><div className="stv"style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">≥60/110</div></div>
-        <div className="st"><div className="stl">Sell</div><div className="stv"style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">≥3/6</div></div>
-        <div className="st"><div className="stl">Portfolio</div><div className="stv"style={{color:'var(--pu)'}}>{nP}</div></div>
-      </div>
+    portfolio = fetch_portfolio()
+    ptokens = {h["token"] for h in portfolio}
+    idx_counts = {n: 0 for n in INDEX_NAMES}
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 50  # higher threshold — many micro-caps return null legitimately
 
-      {/* Scanning progress bar */}
-      {isSc&&(()=>{
-        const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
-        return<div className="scan-bar"style={{flexDirection:'column',gap:'6px'}}>
-          <div style={{display:'flex',alignItems:'center',gap:'8px',width:'100%'}}>
-            <div className="sp"style={{width:16,height:16,margin:0,borderWidth:2,flexShrink:0}}/>
-            <div style={{flex:1}}>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:'3px'}}>
-                <span className="scan-txt">{p.current||0}/{p.total||'?'} stocks</span>
-                <span className="scan-txt">{pct}%{p.ok>0&&` · ${p.ok} analyzed`}{p.errors>0&&` · ${p.errors} skipped`}</span>
-              </div>
-              <div className="scan-prog"><div className="scan-fill"style={{width:`${pct}%`}}/></div>
-            </div>
-          </div>
-          {p.rate_limited&&<div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <span>⚠ Rate limited by Angel One — scan paused/aborted.</span>
-            <button className="btn btn-sm"onClick={resetAndRescan}style={{background:'var(--or)',border:'none',color:'#fff',marginLeft:'8px'}}>↻ Reset & Rescan</button>
-          </div>}
-        </div>
-      })()}
+    for i, inst in enumerate(scan_instrument_list):
+        # Check abort flag
+        if abort_scan:
+            logger.info("Scan aborted by user.")
+            break
 
-      {/* Index filter pills */}
-      <div className="idx-row">
-        {IDX_TABS.map(x=><button key={x.k}className={`idx-btn ${idxFilter===x.k?'a':''}`}data-idx={x.k}onClick={()=>{setIdxFilter(x.k);setActiveWL(null);setTab('all')}}>{x.l}<span className="idx-cnt">{x.k==='all'?nT:(ic[x.k]||0)}</span></button>)}
-      </div>
+        sym, token = inst["symbol"], inst["token"]
+        name = inst.get("name", sym.replace("-EQ",""))
+        clean = sym.replace("-EQ","")
 
-      {/* Watchlist bar */}
-      <div className="wl-bar">
-        <span style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'.5px'}}>Watchlists:</span>
-        {wlNames.map(wn=><div key={wn}className={`wl-chip ${idxFilter==='watchlist'&&activeWL===wn?'a':''}`}onClick={()=>{setIdxFilter('watchlist');setActiveWL(wn);setTab('all')}}>
-          {wn}<span className="idx-cnt">{(watchlists[wn]||[]).length}</span>
-          <span className="x"onClick={e=>{e.stopPropagation();if(confirm(`Delete "${wn}"?`))deleteWL(wn)}}>✕</span>
-        </div>)}
-        {addingWL?<form onSubmit={e=>{e.preventDefault();createWL(newWLName)}}style={{display:'flex',gap:'4px'}}><input ref={inputRef}className="wl-input"value={newWLName}onChange={e=>setNewWLName(e.target.value)}placeholder="Name..."onBlur={()=>setTimeout(()=>setAddingWL(false),200)}/><button type="submit"className="btn btn-sm btn-pu">Add</button></form>
-        :<button className="wl-add-btn"onClick={()=>setAddingWL(true)}>+ New</button>}
-      </div>
+        # Update live progress
+        scan_progress["current"] = i + 1
 
-      {/* Signal tabs */}
-      <div className="tabs">
-        <button className={`tab ${tab==='all'?'a':''}`}onClick={()=>setTab('all')}>All<span className="tc tcb">{filteredCounts.all}</span></button>
-        <button className={`tab ${tab==='buy'?'a':''}`}onClick={()=>setTab('buy')}>Buy<span className="tc tcg">{filteredCounts.buy}</span></button>
-        <button className={`tab ${tab==='sell'?'a':''}`}onClick={()=>setTab('sell')}>Sell<span className="tc tcr">{filteredCounts.sell}</span></button>
-        <button className={`tab ${tab==='port'?'a':''}`}onClick={()=>setTab('port')}>Portfolio<span className="tc tcb">{filteredCounts.port}</span></button>
-      </div>
+        # Abort if too many consecutive errors (rate limit or session dead)
+        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+            logger.error(f"Aborting scan: {consecutive_errors} consecutive errors. Rate limited?")
+            scan_progress["rate_limited"] = True
+            break
 
-      <div className="srch"><input placeholder="Search any NSE stock..."value={search}onChange={e=>setSearch(e.target.value)}/></div>
+        try:
+            result = fetch_candle_data(token)
 
-      <div className="tc2">
-        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{idxFilter==='watchlist'?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{idxFilter==='watchlist'&&activeWL?`"${activeWL}" is empty. Click a stock → add to watchlist.`:search?`No match for "${search}"`:'No stocks for this filter'}</div></div>
-        :<div className="ts"><table>
-          <thead><tr>
-            <th onClick={()=>doSort('symbol')}>Stock</th>
-            <th onClick={()=>doSort('price')}>Price</th>
-            <th onClick={()=>doSort('buy_score')}>Buy</th>
-            <th onClick={()=>doSort('sell_pct')}>Sell</th>
-            <th onClick={()=>doSort('macd_slope')}>MACD ↕</th>
-            <th onClick={()=>doSort('rr_ratio')}>R:R</th>
-            <th>Signal</th>
-          </tr></thead>
-          <tbody>{stocks.map(s=><tr key={s.symbol}onClick={()=>setSel(s)}style={{cursor:'pointer'}}>
-            <td><div className="sn"><span className="sns">{s.name}</span>{s.in_portfolio&&<span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span><ITags indices={s.indices}/></div></td>
-            <td style={{fontWeight:600}}>₹{fmt(s.price)}</td>
-            <td><span className={`score score-buy ${s.buy_score>=75?'strong':''}`}>{s.buy_score}</span></td>
-            <td><span className="score score-sell">{s.sell_count}</span></td>
-            <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve}/></td>
-            <td><RR ratio={s.rr_ratio}/></td>
-            <td>{s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
-          </tr>)}</tbody>
-        </table></div>}
-      </div>
-    </main>
-    {sel&&<Modal s={sel}onClose={()=>setSel(null)}watchlists={watchlists}onAddToWL={toggleInWL}/>}
-  </>
-}
+            # TRUE rate limit / session dead — count toward abort
+            if result is RATE_LIMITED:
+                consecutive_errors += 1
+                errs.append({"symbol": sym, "error": "Rate limited"})
+                scan_progress["errors"] = len(errs)
+                # Back off a bit when rate limited
+                time.sleep(2)
+                continue
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
-</script>
-</body>
-</html>
+            # No data returned (thinly traded stock) — NOT a rate limit
+            if result is None:
+                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
+                consecutive_errors = 0
+                continue
+
+            df = result
+            if len(df) < 50:
+                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
+                consecutive_errors = 0
+                continue
+
+            a = analyze_stock(df)
+            if a is None:
+                errs.append({"symbol": sym, "error": "Analysis failed"})
+                scan_progress["errors"] = len(errs)
+                consecutive_errors = 0  # API worked fine
+                continue
+
+            # ✅ Success — reset consecutive error counter
+            consecutive_errors = 0
+
+            indices = get_indices_for(clean, INDEX_MAP)
+            stock = {"symbol": sym, "name": name, "token": token,
+                     "in_portfolio": token in ptokens, "indices": indices, **a}
+            all_s.append(stock)
+            scan_progress["ok"] = len(all_s)
+
+            for ix in indices:
+                if ix in idx_counts: idx_counts[ix] += 1
+
+            if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
+            if a["is_sell"] and token in ptokens: sells.append(stock)
+
+            # Update scan_results live so frontend can show partial results
+            if len(all_s) % 10 == 0:
+                scan_results.update({
+                    "total_scanned": len(all_s),
+                    "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+                    "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
+                    "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+                    "index_counts": idx_counts.copy(),
+                })
+
+            time.sleep(0.5)  # 2 req/s — safe margin under 3/s limit
+        except Exception as e:
+            err_str = str(e)
+            errs.append({"symbol": sym, "error": err_str})
+            scan_progress["errors"] = len(errs)
+            # Only count as consecutive error if it looks like rate limiting
+            if "access rate" in err_str.lower() or "rate" in err_str.lower() or "timeout" in err_str.lower():
+                consecutive_errors += 1
+                time.sleep(2)
+            else:
+                consecutive_errors = 0
+
+        if (i+1) % 50 == 0:
+            elapsed_so_far = time.time() - t0
+            rate = (i+1) / elapsed_so_far if elapsed_so_far > 0 else 0
+            remaining = (total - i - 1) / rate / 60 if rate > 0 else 0
+            logger.info(f"  {i+1}/{total} ({len(all_s)} ok, {len(errs)} err) ~{remaining:.0f}m left")
+
+    elapsed = time.time() - t0
+    scan_results = {
+        "last_scan": datetime.now().isoformat(), "status": "complete",
+        "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
+        "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+        "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
+        "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+        "portfolio_holdings": portfolio, "errors": errs, "index_counts": idx_counts,
+    }
+    is_scanning = False
+    logger.info(f"FULL SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys, {len(sells)} sells, {len(errs)} errors")
+    for ix, cnt in idx_counts.items():
+        if cnt > 0: logger.info(f"  {ix}: {cnt}")
+
+# ═══════════════════════════════════════════════════════════════
+# SCHEDULER
+# ═══════════════════════════════════════════════════════════════
+
+def scheduler():
+    while True:
+        now = datetime.now()
+        wd = now.weekday() < 5
+        ao = (now.hour==9 and now.minute>=15) or now.hour>=10
+        bc = now.hour<15 or (now.hour==15 and now.minute<=30)
+        if wd and ao and bc: run_full_scan()
+        else: logger.info("Outside market hours")
+        time.sleep(SCAN_INTERVAL)
+
+# ═══════════════════════════════════════════════════════════════
+# ROUTES
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/status")
+def api_status():
+    return jsonify({"connected": credentials_ok,
+                    "instruments_total": len(instrument_list),
+                    "instruments_scan": len(scan_instrument_list),
+                    "scan_mode": scan_mode,
+                    "last_scan": scan_results.get("last_scan"),
+                    "scan_status": scan_results.get("status"), "is_scanning": is_scanning,
+                    "index_counts": scan_results.get("index_counts", {}),
+                    "missing": check_credentials()})
+
+@app.route("/api/scan_mode", methods=["POST"])
+def api_set_scan_mode():
+    global scan_mode
+    mode = request.json.get("mode", "top500").lower()
+    if mode not in ("top500", "full"):
+        return jsonify({"error": "Invalid mode. Use 'top500' or 'full'"}), 400
+    scan_mode = mode
+    apply_scan_mode()
+    return jsonify({"scan_mode": scan_mode, "instruments_scan": len(scan_instrument_list)})
+
+@app.route("/api/reconnect", methods=["POST"])
+def api_reconnect():
+    """Try to re-login and re-download instruments. Called from frontend."""
+    global credentials_ok
+    ok = create_session()
+    if ok:
+        if len(instrument_list) == 0:
+            fetch_instrument_list()
+        return jsonify({"status": "connected", "instruments_scan": len(scan_instrument_list)})
+    return jsonify({"error": "Login failed. Check credentials or try again in a minute."}), 500
+
+@app.route("/api/stop", methods=["POST"])
+def api_stop_scan():
+    """Abort a running scan."""
+    global abort_scan
+    if not is_scanning:
+        return jsonify({"status": "not_scanning"})
+    abort_scan = True
+    return jsonify({"status": "stopping"})
+
+@app.route("/api/reset", methods=["POST"])
+def api_reset():
+    """Clear all scan results and reset to fresh state. Optionally re-login."""
+    global scan_results, is_scanning, abort_scan, scan_progress
+    # Stop any running scan first
+    if is_scanning:
+        abort_scan = True
+        # Wait briefly for scan to stop
+        for _ in range(20):
+            if not is_scanning: break
+            time.sleep(0.25)
+    # Clear everything
+    scan_results = {
+        "last_scan": None, "status": "not_started", "total_scanned": 0,
+        "buy_signals": [], "sell_signals": [], "all_stocks": [],
+        "portfolio_holdings": [], "errors": [],
+        "index_counts": {n: 0 for n in INDEX_NAMES},
+    }
+    scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "rate_limited": False}
+    abort_scan = False
+    # Re-login to get fresh session
+    create_session()
+    if len(instrument_list) == 0:
+        fetch_instrument_list()
+    logger.info("Reset complete. Ready for fresh scan.")
+    return jsonify({"status": "reset", "connected": credentials_ok, "instruments_scan": len(scan_instrument_list)})
+
+@app.route("/api/scan", methods=["POST"])
+def api_trigger_scan():
+    global credentials_ok
+    # If not connected, try to reconnect first
+    if not credentials_ok:
+        if not create_session():
+            return jsonify({"error": "Not connected to Angel One. Click Reconnect."}), 401
+    # If instruments not loaded yet (startup failed), load them now
+    if len(scan_instrument_list) == 0:
+        fetch_instrument_list()
+    if len(scan_instrument_list) == 0:
+        return jsonify({"error": "No instruments loaded. Try reconnecting."}), 500
+    if is_scanning:
+        return jsonify({"status": "already_scanning"}), 409
+    threading.Thread(target=run_full_scan, daemon=True).start()
+    return jsonify({"status": "scan_started", "instruments": len(scan_instrument_list)})
+
+@app.route("/api/results")
+def api_results():
+    return jsonify(scan_results)
+
+@app.route("/api/progress")
+def api_progress():
+    return jsonify(scan_progress)
+
+@app.route("/api/stock/<symbol>")
+def api_stock_detail(symbol):
+    for s in scan_results.get("all_stocks", []):
+        if s["symbol"] == symbol or s["name"] == symbol: return jsonify(s)
+    return jsonify({"error": "Not found"}), 404
+
+@app.route("/")
+def serve_frontend():
+    return send_from_directory(".", "index.html")
+
+# ── Watchlists ──
+watchlists = {}
+
+@app.route("/api/watchlists")
+def api_get_watchlists():
+    return jsonify(watchlists)
+
+@app.route("/api/watchlists/<n>", methods=["PUT"])
+def api_create_watchlist(n):
+    if n not in watchlists: watchlists[n] = []
+    return jsonify({"status": "created", "name": n})
+
+@app.route("/api/watchlists/<n>", methods=["DELETE"])
+def api_delete_watchlist(n):
+    watchlists.pop(n, None)
+    return jsonify({"status": "deleted"})
+
+@app.route("/api/watchlists/<n>/add", methods=["POST"])
+def api_watchlist_add(n):
+    symbol = request.json.get("symbol", "")
+    if n not in watchlists: watchlists[n] = []
+    if symbol and symbol not in watchlists[n]: watchlists[n].append(symbol)
+    return jsonify({"status": "added", "watchlist": watchlists[n]})
+
+@app.route("/api/watchlists/<n>/remove", methods=["POST"])
+def api_watchlist_remove(n):
+    symbol = request.json.get("symbol", "")
+    if n in watchlists and symbol in watchlists[n]: watchlists[n].remove(symbol)
+    return jsonify({"status": "removed", "watchlist": watchlists.get(n, [])})
+
+# ═══════════════════════════════════════════════════════════════
+# INIT
+# ═══════════════════════════════════════════════════════════════
+
+def initialize():
+    global credentials_ok
+    missing = check_credentials()
+    if missing:
+        logger.error(f"Missing env vars: {', '.join(missing)}")
+        credentials_ok = False
+        return False
+
+    # Try to login — if it fails, server still starts (user can reconnect from browser)
+    if create_session():
+        fetch_instrument_list()
+    else:
+        logger.warning("Initial login failed — server starting anyway. Use Reconnect button in browser.")
+
+    threading.Thread(target=scheduler, daemon=True).start()
+    logger.info(f"Ready. Scan mode: {scan_mode.upper()} ({len(scan_instrument_list)} stocks).")
+    return True
