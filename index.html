@@ -287,6 +287,23 @@ function App(){
       fetchAll();
     }catch(e){setScanError('Network error')}
   };
+  const stopScan=async()=>{
+    try{await fetch(`${API}/api/stop`,{method:'POST'});setTimeout(fetchAll,1000)}catch(e){}
+  };
+  const resetAndRescan=async()=>{
+    setScanError(null);
+    try{
+      const r=await fetch(`${API}/api/reset`,{method:'POST'});
+      const j=await r.json();
+      if(!r.ok){setScanError(j.error||'Reset failed');return}
+      fetchAll();
+      // Auto-trigger new scan after reset
+      setTimeout(async()=>{
+        await fetch(`${API}/api/scan`,{method:'POST'});
+        fetchAll();
+      },500);
+    }catch(e){setScanError('Network error')}
+  };
   const toggleScanMode=async()=>{
     const newMode=status?.scan_mode==='top500'?'full':'top500';
     try{await fetch(`${API}/api/scan_mode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:newMode})});fetchAll()}catch(e){}
@@ -376,7 +393,9 @@ function App(){
         </button>
         <div className="bdg"><div className={`dot ${isSc?'w':'on'}`}/>{isSc?'SCANNING':'LIVE'}</div>
         <div className="bdg">{ago(data.last_scan)}{scanDur&&` · ${scanDur}`}</div>
-        <button className="btn btn-g"onClick={triggerScan}disabled={isSc}>{isSc?'…':'▶'}</button>
+        {isSc?<button className="btn btn-r"onClick={stopScan}>⏹ Stop</button>
+        :<button className="btn btn-g"onClick={triggerScan}>▶</button>}
+        <button className="btn"onClick={resetAndRescan}style={{background:'rgba(249,115,22,.15)',color:'var(--or)',border:'1px solid rgba(249,115,22,.25)'}}>↻ Reset</button>
       </div>
     </div></header>
     <main className="mn">
@@ -403,7 +422,10 @@ function App(){
               <div className="scan-prog"><div className="scan-fill"style={{width:`${pct}%`}}/></div>
             </div>
           </div>
-          {p.rate_limited&&<div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600}}>⚠ Rate limited by Angel One — scan paused/aborted. Wait a minute and try again.</div>}
+          {p.rate_limited&&<div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span>⚠ Rate limited by Angel One — scan paused/aborted.</span>
+            <button className="btn btn-sm"onClick={resetAndRescan}style={{background:'var(--or)',border:'none',color:'#fff',marginLeft:'8px'}}>↻ Reset & Rescan</button>
+          </div>}
         </div>
       })()}
 
