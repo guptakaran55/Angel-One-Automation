@@ -253,13 +253,16 @@ def find_support_resistance(high, low, close, lookback=60):
 # ═══════════════════════════════════════════════════════════════
 
 def analyze_stock(df):
-    if df is None or len(df) < 200: return None
+    if df is None or len(df) < 50: return None
     close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
+    n_candles = len(df)
     price = close.iloc[-1]
     ok = lambda v: not pd.isna(v)
     sf = lambda v, d=2: round(float(v),d) if ok(v) else None
 
-    s200 = calc_sma(close,200).iloc[-1]
+    # SMA(200) — only calculate if we have enough data
+    s200 = calc_sma(close,200).iloc[-1] if n_candles >= 200 else np.nan
+
     r14 = calc_rsi(close,14).iloc[-1]
     bm,bu,bl = calc_bb(close,20,2)
     ml,ms,mh = calc_macd(close)
@@ -309,7 +312,7 @@ def analyze_stock(df):
     tlb = any(close.iloc[i]<=bl.iloc[i] for i in range(-5,0) if ok(bl.iloc[i]))
     abm = bool(price<=cbm) if ok(cbm) else False
 
-    support, resistance = find_support_resistance(high,low,close,60)
+    support, resistance = find_support_resistance(high,low,close, min(60, n_candles - 5))
     risk = round(price-support,2) if support else 0
     reward = round(resistance-price,2) if resistance else 0
     rr_ratio = round(reward/risk,2) if risk>0 else 0
@@ -336,8 +339,9 @@ def analyze_stock(df):
     # 1. SMA(200) — 25 pts
     sma_p = bool(price > s200) if ok(s200) else False
     sma_pts = 25 if sma_p else 0; buy_score += sma_pts
+    sma_desc = "Close > SMA(200)" if ok(s200) else f"N/A ({n_candles} candles < 200)"
     buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": 25,
-                                "val": sf(s200), "desc": "Close > SMA(200)"}
+                                "val": sf(s200), "desc": sma_desc}
 
     # 2. MACD INFLECTION — 30 pts (★ highest weight)
     #    Best case: MACD just crossed zero up (0 < MACD < 0.15) AND d²/dt² > 0
@@ -450,14 +454,23 @@ def run_full_scan():
 
         try:
             df = fetch_candle_data(token)
-            if df is None or len(df) < 200:
-                errs.append({"symbol": sym, "error": "< 200 daily candles"})
-                scan_progress["errors"] = len(errs)
+            if df is None:
+                # API returned nothing — this IS a potential rate limit issue
                 consecutive_errors += 1
+                errs.append({"symbol": sym, "error": "No data returned"})
+                scan_progress["errors"] = len(errs)
+                continue
+            if len(df) < 50:
+                # Too few candles — not an API error, just a thinly traded stock
+                errs.append({"symbol": sym, "error": f"Only {len(df)} candles"})
+                scan_progress["errors"] = len(errs)
+                # Do NOT increment consecutive_errors — this is normal for small caps
                 continue
             a = analyze_stock(df)
             if a is None:
-                consecutive_errors += 1
+                # Analysis failed but API worked — not a rate limit
+                errs.append({"symbol": sym, "error": "Analysis returned None"})
+                scan_progress["errors"] = len(errs)
                 continue
 
             # Success — reset consecutive error counter
