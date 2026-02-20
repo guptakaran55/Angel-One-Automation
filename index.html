@@ -137,6 +137,19 @@ function MACDSlope({slope,phase,curve}){
   </div>
 }
 
+function PriceAccel({vel,accel,upDays}){
+  if(vel==null&&accel==null)return<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>;
+  const aCol=accel>0?'var(--gn)':accel<0?'var(--rd)':'var(--t3)';
+  const vCol=vel>0?'var(--gn)':vel<0?'var(--rd)':'var(--t3)';
+  return<div style={{display:'flex',flexDirection:'column',gap:'0px'}}>
+    <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
+      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:vCol,fontWeight:700}}>{vel>0?'+':''}{vel?.toFixed(2)}%</span>
+      {upDays>=3&&<span style={{fontSize:'7px',background:'var(--gg)',color:'var(--gn)',padding:'0 3px',borderRadius:'2px',fontWeight:700}}>↑{upDays}d</span>}
+    </div>
+    <span style={{fontSize:'7px',fontFamily:"'JetBrains Mono'",color:aCol}}>{accel>0?'▲':accel<0?'▼':'–'} {accel!=null?Math.abs(accel).toFixed(3):''}</span>
+  </div>
+}
+
 function Modal({s,onClose,watchlists,onAddToWL}){
   if(!s)return null;
   const bb=s.buy_breakdown||{};const sc=s.sell_conditions||{};
@@ -212,6 +225,22 @@ function Modal({s,onClose,watchlists,onAddToWL}){
           </div>
         </div>
       })()}
+      {/* Price Dynamics */}
+      <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'8px'}}>PRICE DYNAMICS</div>
+        <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Daily Δ (velocity)</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_vel>0?'var(--gn)':s.price_vel<0?'var(--rd)':'var(--t3)'}}>{s.price_vel!=null?(s.price_vel>0?'+':'')+s.price_vel.toFixed(2)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Acceleration (d²P/dt²)</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_accel>0?'var(--gn)':s.price_accel<0?'var(--rd)':'var(--t3)'}}>{s.price_accel!=null?(s.price_accel>0?'+':'')+s.price_accel.toFixed(3)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>3-day ROC</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_roc3>0?'var(--gn)':s.price_roc3<0?'var(--rd)':'var(--t3)'}}>{s.price_roc3!=null?(s.price_roc3>0?'+':'')+s.price_roc3.toFixed(2)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Consecutive Up</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.up_days>=3?'var(--gn)':'var(--t2)'}}>{s.up_days||0} days</div></div>
+        </div>
+        <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
+          {s.price_accel>0&&s.price_vel>0&&'Price rising and accelerating — strong buying pressure'}
+          {s.price_accel>0&&s.price_vel<0&&'Price still falling but deceleration starting — potential reversal'}
+          {s.price_accel<0&&s.price_vel>0&&'Price rising but losing steam — momentum fading'}
+          {s.price_accel<0&&s.price_vel<0&&'Price falling and accelerating down — strong selling pressure'}
+        </div>
+      </div>
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
       <div className="ig"style={{marginBottom:'16px'}}>{indicators.map(k=>{const b=bb[k];if(!b)return null;const pct=b.max>0?(b.pts/b.max*100):0;
         return<div className="ic"key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={`ics ${b.pass?'p':'f'}`}>{b.pts}/{b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f"style={{width:`${pct}%`,background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
@@ -240,7 +269,9 @@ function App(){
   useEffect(()=>{if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
 
   const fetchAll=useCallback(async()=>{try{const[r1,r2,r3]=await Promise.all([fetch(`${API}/api/results`),fetch(`${API}/api/status`),fetch(`${API}/api/progress`)]);setData(await r1.json());setStatus(await r2.json());setProgress(await r3.json())}catch(e){}finally{setLoading(false)}},[]);
-  useEffect(()=>{fetchAll();const t=setInterval(fetchAll,isSc?5000:15000);return()=>clearInterval(t)},[fetchAll,isSc]);
+  const scanningRef=useRef(false);
+  useEffect(()=>{scanningRef.current=data?.status==='scanning'||status?.is_scanning||false},[data,status]);
+  useEffect(()=>{fetchAll();const t=setInterval(()=>fetchAll(),scanningRef.current?5000:15000);return()=>clearInterval(t)},[fetchAll]);
   const[scanError,setScanError]=useState(null);
 
   const triggerScan=async()=>{
@@ -431,6 +462,7 @@ function App(){
             <th onClick={()=>doSort('buy_score')}>Buy</th>
             <th onClick={()=>doSort('sell_pct')}>Sell</th>
             <th onClick={()=>doSort('macd_slope')}>MACD ↕</th>
+            <th onClick={()=>doSort('price_accel')}>Price ↕</th>
             <th onClick={()=>doSort('rr_ratio')}>R:R</th>
             <th>Signal</th>
           </tr></thead>
@@ -440,6 +472,7 @@ function App(){
             <td><span className={`score score-buy ${s.buy_score>=75?'strong':''}`}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
             <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve}/></td>
+            <td><PriceAccel vel={s.price_vel} accel={s.price_accel} upDays={s.up_days}/></td>
             <td><RR ratio={s.rr_ratio}/></td>
             <td>{s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
           </tr>)}</tbody>
