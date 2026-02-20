@@ -114,7 +114,7 @@ function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
 function ITags({indices}){if(!indices||!indices.length)return null;return<>{indices.map(i=><span key={i}className={`itag ${ITAG_CLS[i]||'itag-other'}`}>{i}</span>)}</>}
 function SellDots({c}){return<div className="ds">{Object.keys(c).map(k=><div key={k}className={`d ${c[k]?'p':'f'}`}title={k}/>)}</div>}
 function RR({ratio}){if(!ratio||ratio<=0)return<span className="rr rr-bad">—</span>;const cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';return<span className={`rr ${cl}`}>{ratio.toFixed(1)}:1</span>}
-function MACDSlope({slope,phase,curve}){
+function MACDSlope({slope,phase,curve,zeroY}){
   if(slope==null)return<span className="macd-slope slope-flat">—</span>;
   const phaseColors={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
   const col=phaseColors[phase]||"var(--t3)";
@@ -124,9 +124,10 @@ function MACDSlope({slope,phase,curve}){
     const pts=curve.map((v,i)=>`${(i/(curve.length-1))*w},${h-v*h}`);
     pathD=`M${pts.join(' L')}`;
   }
+  const zy=zeroY!=null?zeroY:0.5;
   return<div style={{display:'flex',alignItems:'center',gap:'4px'}}>
     {pathD&&<svg width="48"height="18"viewBox="0 0 48 18"style={{flexShrink:0}}>
-      <line x1="0"y1="9"x2="48"y2="9"stroke="var(--bd2)"strokeWidth="0.5"strokeDasharray="2,2"/>
+      <line x1="0"y1={18-zy*18}x2="48"y2={18-zy*18}stroke="var(--rd)"strokeWidth="0.5"strokeDasharray="2,2"opacity="0.5"/>
       <path d={pathD}fill="none"stroke={col}strokeWidth="1.5"strokeLinecap="round"strokeLinejoin="round"/>
       <circle cx={48}cy={18-(curve[curve.length-1]||0)*18}r="2"fill={col}/>
     </svg>}
@@ -201,11 +202,14 @@ function Modal({s,onClose,watchlists,onAddToWL}){
             const w=260,h=50;
             const pts=cv.map((v,i)=>`${(i/(cv.length-1))*w},${h-v*h}`);
             const pathD=`M${pts.join(' L')}`;
-            // Zero line position (find where normalised value maps to 0)
+            const zy=s.macd_zero_y!=null?s.macd_zero_y:0.5;
+            const zeroLineY=h-zy*h;
             return<svg width="100%"height="50"viewBox={`0 0 ${w} ${h}`}preserveAspectRatio="none"style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.2)'}}>
-              <line x1="0"y1={h/2}x2={w}y2={h/2}stroke="var(--bd2)"strokeWidth="0.5"strokeDasharray="3,3"/>
+              <line x1="0"y1={zeroLineY}x2={w}y2={zeroLineY}stroke="var(--rd)"strokeWidth="0.7"strokeDasharray="3,3"opacity="0.5"/>
+              <text x="3"y={zeroLineY-3}fill="var(--t3)"fontSize="6"fontFamily="'JetBrains Mono'">0</text>
               <path d={pathD}fill="none"stroke={pc}strokeWidth="2"strokeLinecap="round"strokeLinejoin="round"/>
               <circle cx={w}cy={h-(cv[cv.length-1]||0)*h}r="3"fill={pc}/>
+            </svg>
             </svg>
           })()}
           <div style={{display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
@@ -350,11 +354,13 @@ function App(){
     return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="bdg"><div className="dot off"/>OFFLINE</div></div></header><main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>🔐</div><h2>Credentials Required</h2><div>{status.missing.map(m=><span key={m}className="miss">{m}</span>)}</div><code>{`ANGEL_API_KEY=your_key\nANGEL_CLIENT_ID=your_id\nANGEL_PASSWORD=your_pin\nANGEL_TOTP_TOKEN=your_totp`}</code></div></main></>;
   }
 
-  const nT=data?.total_scanned||0;
+  const nT=data?.all_stocks?.length||data?.total_scanned||0;
   const isSc=data?.status==='scanning'||status?.is_scanning;
   const instCount=status?.instruments_scan||0;
 
-  if(!data||!data.last_scan||nT===0){
+  const hasResults = nT > 0 || (data?.all_stocks?.length > 0);
+
+  if(!data || (!hasResults && !isSc) || (!data.last_scan && !isSc)){
     const isConn=status?.connected;
     return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr">
       <div className="bdg"><div className={`dot ${isSc?'w':isConn?'on':'off'}`}/>{isSc?'SCANNING':isConn?'READY':'OFFLINE'}</div>
@@ -471,7 +477,7 @@ function App(){
             <td style={{fontWeight:600}}>₹{fmt(s.price)}</td>
             <td><span className={`score score-buy ${s.buy_score>=75?'strong':''}`}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
-            <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve}/></td>
+            <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve} zeroY={s.macd_zero_y}/></td>
             <td><PriceAccel vel={s.price_vel} accel={s.price_accel} upDays={s.up_days}/></td>
             <td><RR ratio={s.rr_ratio}/></td>
             <td>{s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
