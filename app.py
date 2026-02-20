@@ -317,6 +317,7 @@ def analyze_stock(df):
 
     # Mini MACD curve (last 20 values, normalised for sparkline)
     macd_curve = []
+    macd_zero_y = 0.5  # default: middle
     n_curve = min(20, len(ml))
     if n_curve > 2:
         raw = [float(ml.iloc[-n_curve + j]) for j in range(n_curve) if ok(ml.iloc[-n_curve + j])]
@@ -324,6 +325,9 @@ def analyze_stock(df):
             mn, mx = min(raw), max(raw)
             rng = mx - mn if mx != mn else 1
             macd_curve = [round((v - mn) / rng, 3) for v in raw]
+            # Where does MACD=0 sit in the normalized 0-1 range?
+            macd_zero_y = round((0 - mn) / rng, 3)
+            macd_zero_y = max(0, min(1, macd_zero_y))  # clamp to 0-1
 
     # ══════════════════════════════════════════════════════════
     # BUY SCORE — Revised Weights (max ~110 with all bonuses)
@@ -421,7 +425,7 @@ def analyze_stock(df):
         "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
         "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
         "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),
-        "macd_phase":macd_phase,"macd_curve":macd_curve,
+        "macd_phase":macd_phase,"macd_curve":macd_curve,"macd_zero_y":macd_zero_y,
         "obv":sf(co,0),"adx":sf(curr_adx),
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
         "price_accel":round(price_accel,3),"up_days":up_days,
