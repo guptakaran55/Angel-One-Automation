@@ -1,9 +1,10 @@
 """
 Index constituent lists for Indian stock markets.
-Known index members are hardcoded. All other NSE equities are scanned too
-and auto-classified as "OTHER NSE".
-Last updated: Feb 2026.
+NIFTY 500 downloaded dynamically from NSE at startup.
+Sub-indices (NIFTY 50, NIFTY 100, BSE 100) hardcoded for tagging.
 """
+import requests, logging, io, csv
+logger = logging.getLogger(__name__)
 
 NIFTY_50 = [
     "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK",
@@ -31,99 +32,88 @@ NIFTY_NEXT_50 = [
     "YESBANK","ZOMATO","ZYDUSLIFE","IDEA","MOTHERSON",
 ]
 
-NIFTY_MIDCAP_100 = [
-    "ADANIGREEN","ADANIPOWER","ADANIENERGY","ADANITOTAL",
-    "MUTHOOTFIN","CUMMINSIND","POLYCAB","PERSISTENT","SUZLON",
-    "FEDERALBNK","INDUSTOWER","INDIANB","BSE","ASHOKLEY",
-    "BHEL","PBFINTECH","SWIGGY","HDFCAMC","COFORGE",
-    "AUBANK","IDFCFIRSTB","OBEROIRLTY","AUROPHARMA","OFSS",
-    "PIIND","ESCORTS","PAGEIND","MPHASIS","TATAELXSI",
-    "KPITTECH","VOLTAS","LODHA","DELHIVERY","MRF",
-    "SUNDARMFIN","LICHSGFIN","MFSL","NATIONALUM","HUDCO",
-    "BANKINDIA","ALKEM","HINDCOPPER","SAIL","PETRONET",
-    "DIXON","TATAPOWER","IREDA","GUJGASLTD","SJVN",
-    "NMDC","BALKRISIND","SUPREMEIND","APLAPOLLO","PHOENIXLTD",
-    "ASTRAL","JUBLFOOD","MANAPPURAM","DEEPAKNTR","CROMPTON",
-    "SONACOMS","ACC","BIOCON","KALYANKJIL","METROBRAND",
-    "BSOFT","PATANJALI","JSL","THERMAX","SYNGENE",
-    "HONAUT","EXIDEIND","KEI","CGPOWER","PRESTIGE",
-    "IPCALAB","CONCOR","BANDHANBNK","FORTIS","RBLBANK",
-    "IDBIBANK","GMRAIRPORT","INDIAMART","ANGELONE","GODREJPROP",
-    "ZEEL","LALPATHLAB","AJANTPHARM","TATACOMM","BDL",
-    "COCHINSHIP","TATACHEM","ABCAPITAL","POONAWALLA","CAMS",
-    "CLEAN","KAYNES","SUNTV","NAVINFLUOR","RVNL","TIINDIA",
-]
+NIFTY_100 = set(NIFTY_50 + NIFTY_NEXT_50)
 
-NIFTY_MIDCAP_150_EXTRA = [
-    "ENDURANCE","SOLARINDS","NAUKRI","CENTRALBK","NIACL",
-    "EMAMILTD","GLAXO","AIAENG","IIFL","RAJESHEXPO",
+BSE_100_EXTRA = [
+    "ADANIGREEN","ADANIPOWER","MUTHOOTFIN","CUMMINSIND","POLYCAB",
+    "PERSISTENT","SUZLON","FEDERALBNK","INDUSTOWER","BSE",
+    "BHEL","HDFCAMC","COFORGE","AUROPHARMA","TATAPOWER",
+    "DIXON","IREDA","ACC","BIOCON","GODREJPROP",
+]
+BSE_100 = set(NIFTY_50 + NIFTY_NEXT_50 + BSE_100_EXTRA)
+
+# ── Fallback if NSE CSV download fails ──
+FALLBACK_EXTRA = [
+    "ADANIENERGY","ADANITOTAL","INDIANB","ASHOKLEY","PBFINTECH",
+    "SWIGGY","AUBANK","IDFCFIRSTB","OBEROIRLTY","OFSS","PIIND",
+    "ESCORTS","PAGEIND","MPHASIS","TATAELXSI","KPITTECH","VOLTAS",
+    "LODHA","DELHIVERY","MRF","SUNDARMFIN","LICHSGFIN","MFSL",
+    "NATIONALUM","HUDCO","BANKINDIA","ALKEM","HINDCOPPER","SAIL",
+    "PETRONET","GUJGASLTD","SJVN","NMDC","BALKRISIND","SUPREMEIND",
+    "APLAPOLLO","PHOENIXLTD","ASTRAL","JUBLFOOD","MANAPPURAM",
+    "DEEPAKNTR","CROMPTON","SONACOMS","KALYANKJIL","METROBRAND",
+    "BSOFT","PATANJALI","JSL","THERMAX","SYNGENE","HONAUT",
+    "EXIDEIND","KEI","CGPOWER","PRESTIGE","IPCALAB","CONCOR",
+    "BANDHANBNK","FORTIS","RBLBANK","IDBIBANK","GMRAIRPORT",
+    "INDIAMART","ANGELONE","ZEEL","LALPATHLAB","AJANTPHARM",
+    "TATACOMM","BDL","COCHINSHIP","TATACHEM","ABCAPITAL",
+    "POONAWALLA","CAMS","CLEAN","KAYNES","SUNTV","NAVINFLUOR",
+    "RVNL","TIINDIA","ENDURANCE","SOLARINDS","NAUKRI","CENTRALBK",
+    "NIACL","EMAMILTD","GLAXO","AIAENG","IIFL","RAJESHEXPO",
     "ABFRL","BLUESTARLT","KANSAINER","SUNDRMFAST","EIDPARRY",
     "MAHABANK","LINDEINDIA","BRIGADE","GRINDWELL","SCHAEFFLER",
-    "APTUS","JKCEMENT","ASTRAZEN","CYIENT","NUVOCO",
-    "AAVAS","HAPPSTMNDS","RATNAMANI","FIVESTAR","GPPL",
-    "SUMICHEM","TRIVENI","ZENSARTECH","POLYMED","FINCABLES",
-    "MAHSEAMLESS","SAPPHIRE","WHIRLPOOL","DATAPATTNS","FINEORG",
-    "ISEC","LATENTVIEW","RENUKA","ROUTE","SWANENERGY",
-    "TIMKEN","PGHH",
+    "APTUS","JKCEMENT","ASTRAZEN","CYIENT","NUVOCO","AAVAS",
+    "HAPPSTMNDS","RATNAMANI","FIVESTAR","GPPL","SUMICHEM",
+    "TRIVENI","ZENSARTECH","POLYMED","FINCABLES","TIMKEN","PGHH",
 ]
 
-BSE_100 = NIFTY_50 + [
-    "ABB","ABBOTINDIA","AMBUJACEM","BANKBARODA","BERGEPAINT",
-    "BOSCHLTD","CHOLAFIN","COLPAL","DABUR","DIVISLAB",
-    "DLF","GAIL","GODREJCP","HAVELLS","HINDPETRO",
-    "ICICIPRULI","INDHOTEL","IOC","IRCTC","IRFC",
-    "JIOFIN","JSWENERGY","LICI","LTIM","LUPIN",
-    "MARICO","MAXHEALTH","NHPC","PFC","PIDILITIND",
-    "PNB","RECLTD","SBICARD","SHREECEM","SHRIRAMFIN",
-    "SIEMENS","SRF","TORNTPHARM","TVSMOTOR","VEDL",
-    "YESBANK","ZOMATO","ZYDUSLIFE","BAJAJHLDNG","CANBK",
-    "MOTHERSON","UNITDSPR","VBL","IDEA","UNIONBANK",
-]
+FALLBACK_SET = set(NIFTY_50 + NIFTY_NEXT_50 + BSE_100_EXTRA + FALLBACK_EXTRA)
 
-NIFTY_MIDCAP_150 = NIFTY_MIDCAP_100 + NIFTY_MIDCAP_150_EXTRA
+NIFTY_500_URL = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
 
-# All known index members combined
-ALL_KNOWN = set(NIFTY_50 + NIFTY_NEXT_50 + BSE_100 + NIFTY_MIDCAP_150 + NIFTY_MIDCAP_100)
+def download_nifty500():
+    """Download current NIFTY 500 from NSE. Returns set of symbols or None."""
+    try:
+        logger.info("Downloading NIFTY 500 list from NSE...")
+        resp = requests.get(NIFTY_500_URL, timeout=30)
+        resp.raise_for_status()
+        text = resp.content.decode('utf-8-sig', errors='replace')
+        reader = csv.DictReader(io.StringIO(text))
+        symbols = set()
+        for row in reader:
+            sym = row.get("Symbol", "").strip()
+            if sym:
+                symbols.add(sym)
+        if len(symbols) > 400:
+            logger.info(f"NIFTY 500: {len(symbols)} stocks downloaded")
+            return symbols
+        logger.warning(f"Only {len(symbols)} symbols — using fallback")
+        return None
+    except Exception as e:
+        logger.warning(f"NIFTY 500 download failed: {e} — using fallback")
+        return None
 
-# ── Index categories (order matters for display) ──
-INDEX_NAMES = ["NIFTY 50", "NIFTY 100", "NIFTY 200", "BSE 100", "MIDCAP 150", "OTHER NSE"]
+
+def get_scan_universe():
+    """Get the set of symbols to scan. Tries NIFTY 500 CSV, falls back to hardcoded ~350."""
+    n500 = download_nifty500()
+    if n500:
+        return n500
+    return FALLBACK_SET
 
 
-def build_index_map():
-    """Returns dict: symbol -> list of index names."""
-    index_map = {}
-
+def build_index_tags():
+    """Returns dict: symbol -> list of index tags (NIFTY 50, NIFTY 100, BSE 100)."""
+    tags = {}
     for sym in NIFTY_50:
-        index_map.setdefault(sym, []).append("NIFTY 50")
-
-    nifty_100 = set(NIFTY_50 + NIFTY_NEXT_50)
-    for sym in nifty_100:
-        index_map.setdefault(sym, [])
-        if "NIFTY 100" not in index_map[sym]:
-            index_map[sym].append("NIFTY 100")
-
-    nifty_200 = nifty_100 | set(NIFTY_MIDCAP_100)
-    for sym in nifty_200:
-        index_map.setdefault(sym, [])
-        if "NIFTY 200" not in index_map[sym]:
-            index_map[sym].append("NIFTY 200")
-
+        tags.setdefault(sym, []).append("NIFTY 50")
+    for sym in NIFTY_100:
+        tags.setdefault(sym, []).append("NIFTY 100")
     for sym in BSE_100:
-        index_map.setdefault(sym, [])
-        if "BSE 100" not in index_map[sym]:
-            index_map[sym].append("BSE 100")
-
-    for sym in NIFTY_MIDCAP_150:
-        index_map.setdefault(sym, [])
-        if "MIDCAP 150" not in index_map[sym]:
-            index_map[sym].append("MIDCAP 150")
-
-    return index_map
-
-
-def get_indices_for(symbol, index_map):
-    """Get index tags for a symbol. If not in any known index, tag as OTHER NSE."""
-    tags = index_map.get(symbol, [])
-    if not tags:
-        return ["OTHER NSE"]
+        tags.setdefault(sym, []).append("BSE 100")
     return tags
+
+
+def get_tags_for(symbol, tag_map):
+    """Get index tags for a symbol."""
+    return tag_map.get(symbol, [])
