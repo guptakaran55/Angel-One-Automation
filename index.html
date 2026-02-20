@@ -140,14 +140,15 @@ function MACDSlope({slope,phase,curve,zeroY}){
 
 function PriceAccel({vel,accel,upDays}){
   if(vel==null&&accel==null)return<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>;
-  const aCol=accel>0?'var(--gn)':accel<0?'var(--rd)':'var(--t3)';
-  const vCol=vel>0?'var(--gn)':vel<0?'var(--rd)':'var(--t3)';
+  const v=vel||0,a=accel||0,ud=upDays||0;
+  const aCol=a>0?'var(--gn)':a<0?'var(--rd)':'var(--t3)';
+  const vCol=v>0?'var(--gn)':v<0?'var(--rd)':'var(--t3)';
   return<div style={{display:'flex',flexDirection:'column',gap:'0px'}}>
     <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
-      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:vCol,fontWeight:700}}>{vel>0?'+':''}{vel?.toFixed(2)}%</span>
-      {upDays>=3&&<span style={{fontSize:'7px',background:'var(--gg)',color:'var(--gn)',padding:'0 3px',borderRadius:'2px',fontWeight:700}}>↑{upDays}d</span>}
+      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:vCol,fontWeight:700}}>{v>0?'+':''}{v.toFixed(2)}%</span>
+      {ud>=3&&<span style={{fontSize:'7px',background:'var(--gg)',color:'var(--gn)',padding:'0 3px',borderRadius:'2px',fontWeight:700}}>↑{ud}d</span>}
     </div>
-    <span style={{fontSize:'7px',fontFamily:"'JetBrains Mono'",color:aCol}}>{accel>0?'▲':accel<0?'▼':'–'} {accel!=null?Math.abs(accel).toFixed(3):''}</span>
+    <span style={{fontSize:'7px',fontFamily:"'JetBrains Mono'",color:aCol}}>{a>0?'▲':a<0?'▼':'–'} {Math.abs(a).toFixed(3)}</span>
   </div>
 }
 
@@ -206,7 +207,7 @@ function Modal({s,onClose,watchlists,onAddToWL}){
             const zeroLineY=h-zy*h;
             return<svg width="100%"height="50"viewBox={`0 0 ${w} ${h}`}preserveAspectRatio="none"style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.2)'}}>
               <line x1="0"y1={zeroLineY}x2={w}y2={zeroLineY}stroke="var(--rd)"strokeWidth="0.7"strokeDasharray="3,3"opacity="0.5"/>
-              <text x="3"y={zeroLineY-3}fill="var(--t3)"fontSize="6"fontFamily="'JetBrains Mono'">0</text>
+              <text x="3"y={zeroLineY-3}fill="var(--t3)"fontSize="6">0</text>
               <path d={pathD}fill="none"stroke={pc}strokeWidth="2"strokeLinecap="round"strokeLinejoin="round"/>
               <circle cx={w}cy={h-(cv[cv.length-1]||0)*h}r="3"fill={pc}/>
             </svg>
@@ -489,7 +490,16 @@ function App(){
   </>
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+class ErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={err:null}}
+  static getDerivedStateFromError(e){return{err:e}}
+  render(){if(this.state.err)return React.createElement('div',{style:{padding:'40px',color:'#ef4444',fontFamily:'monospace',fontSize:'13px',background:'#0a0e17',minHeight:'100vh'}},
+    React.createElement('h2',null,'⚠ UI Error'),
+    React.createElement('pre',{style:{whiteSpace:'pre-wrap',marginTop:'10px'}},this.state.err.toString()),
+    React.createElement('button',{onClick:()=>window.location.reload(),style:{marginTop:'16px',padding:'8px 16px',background:'#10b981',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer'}},'Reload')
+  );return this.props.children}
+}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary,null,React.createElement(App)));
 </script>
 </body>
 </html>
