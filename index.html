@@ -4,67 +4,62 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="theme-color" content="#0a0e17"/>
+<meta name="theme-color" content="#f8fafc"/>
 <title>SignalScope</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
-:root{--bg:#0a0e17;--bg2:#111827;--cd:#151d2e;--cdh:#1a2438;--bd:#1e293b;--bd2:#334155;--t1:#f1f5f9;--t2:#94a3b8;--t3:#64748b;--gn:#10b981;--gg:rgba(16,185,129,.12);--rd:#ef4444;--rg:rgba(239,68,68,.12);--am:#f59e0b;--bl:#3b82f6;--pu:#8b5cf6;--cy:#06b6d4;--or:#f97316;--tl:#14b8a6;--pk:#ec4899}
+:root{--bg:#f8fafc;--bg2:#f1f5f9;--cd:#ffffff;--cdh:#f1f5f9;--bd:#e2e8f0;--bd2:#cbd5e1;--t1:#0f172a;--t2:#475569;--t3:#94a3b8;--gn:#059669;--gg:rgba(5,150,105,.08);--rd:#dc2626;--rg:rgba(220,38,38,.08);--am:#d97706;--bl:#2563eb;--pu:#7c3aed;--cy:#0891b2;--or:#ea580c;--tl:#0d9488;--pk:#db2777}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-height:100dvh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
-.hdr{position:sticky;top:0;z-index:100;background:rgba(10,14,23,.88);backdrop-filter:blur(20px);border-bottom:1px solid var(--bd);padding:0 16px}
+.hdr{position:sticky;top:0;z-index:100;background:rgba(248,250,252,.92);backdrop-filter:blur(20px);border-bottom:1px solid var(--bd);padding:0 16px}
 .hi{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:52px}
-.logo{display:flex;align-items:center;gap:8px}.lic{width:28px;height:28px;background:linear-gradient(135deg,var(--gn),var(--cy));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--bg)}.lt{font-size:15px;font-weight:700}
+.logo{display:flex;align-items:center;gap:8px}.lic{width:28px;height:28px;background:linear-gradient(135deg,var(--gn),var(--cy));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff}.lt{font-size:15px;font-weight:700}
 .hr{display:flex;align-items:center;gap:6px}
-.bdg{display:flex;align-items:center;gap:4px;padding:4px 9px;background:var(--cd);border:1px solid var(--bd);border-radius:14px;font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace}
+.bdg{display:flex;align-items:center;gap:4px;padding:4px 9px;background:var(--bg2);border:1px solid var(--bd);border-radius:14px;font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace}
 .dot{width:6px;height:6px;border-radius:50%}.dot.on{background:var(--gn);animation:p1 2s infinite}.dot.off{background:var(--rd)}.dot.w{background:var(--am);animation:p2 2s infinite}
-@keyframes p1{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}}
-@keyframes p2{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.5)}50%{box-shadow:0 0 0 5px rgba(245,158,11,0)}}
+@keyframes p1{0%,100%{box-shadow:0 0 0 0 rgba(5,150,105,.4)}50%{box-shadow:0 0 0 5px rgba(5,150,105,0)}}
+@keyframes p2{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.4)}50%{box-shadow:0 0 0 5px rgba(217,119,6,0)}}
 .btn{padding:6px 12px;border:1px solid var(--bd);border-radius:7px;background:var(--cd);color:var(--t1);font-size:11px;font-weight:600;cursor:pointer;transition:.1s}.btn:active{transform:scale(.97)}
-.btn-g{background:linear-gradient(135deg,var(--gn),#059669);border:none;color:#fff}.btn-g:disabled{opacity:.5}
+.btn-g{background:linear-gradient(135deg,var(--gn),#047857);border:none;color:#fff}.btn-g:disabled{opacity:.5}
 .btn-sm{padding:4px 8px;font-size:10px;border-radius:5px}
-.btn-r{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.2)}
-.btn-pu{background:rgba(139,92,246,.12);color:var(--pu);border:1px solid rgba(139,92,246,.2)}
+.btn-r{background:var(--rg);color:var(--rd);border:1px solid rgba(220,38,38,.2)}
+.btn-pu{background:rgba(124,58,237,.08);color:var(--pu);border:1px solid rgba(124,58,237,.2)}
 .mn{max-width:1400px;margin:0 auto;padding:14px}
 .sts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-.st{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px}
+.st{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .stl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--t3);margin-bottom:3px}
 .stv{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-1px}
 .sts2{font-size:9px;color:var(--t3);font-family:'JetBrains Mono',monospace}
-/* Index pill row */
 .idx-cnt{font-family:'JetBrains Mono',monospace;font-size:9px;opacity:.8}
-/* Signal tabs */
 .tabs{display:flex;gap:2px;background:var(--bg2);padding:3px;border-radius:9px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .tab{padding:7px 12px;border-radius:6px;font-size:11px;font-weight:600;color:var(--t3);cursor:pointer;border:none;background:transparent;white-space:nowrap;display:flex;align-items:center;gap:5px;flex-shrink:0}
-.tab.a{background:var(--cd);color:var(--t1);box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.tab.a{background:var(--cd);color:var(--t1);box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .tc{padding:1px 5px;border-radius:7px;font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:700}
-.tcg{background:var(--gg);color:var(--gn)}.tcr{background:var(--rg);color:var(--rd)}.tcb{background:rgba(59,130,246,.12);color:var(--bl)}.tcp{background:rgba(139,92,246,.12);color:var(--pu)}
+.tcg{background:var(--gg);color:var(--gn)}.tcr{background:var(--rg);color:var(--rd)}.tcb{background:rgba(37,99,235,.08);color:var(--bl)}.tcp{background:rgba(124,58,237,.08);color:var(--pu)}
 .srch{position:relative;margin-bottom:12px}.srch input{width:100%;padding:9px 12px 9px 34px;background:var(--cd);border:1px solid var(--bd);border-radius:9px;color:var(--t1);font-size:13px;outline:none}.srch input:focus{border-color:var(--bl)}.srch input::placeholder{color:var(--t3)}.srch::before{content:'⌕';position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:14px}
-.tc2{background:var(--cd);border:1px solid var(--bd);border-radius:11px;overflow:hidden}.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tc2{background:var(--cd);border:1px solid var(--bd);border-radius:11px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}
 table{width:100%;border-collapse:collapse;font-size:11px}thead{position:sticky;top:0;z-index:5}
 th{padding:9px 10px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);background:var(--bg2);border-bottom:1px solid var(--bd);white-space:nowrap;cursor:pointer}
-td{padding:10px;border-bottom:1px solid rgba(30,41,59,.3);white-space:nowrap;font-family:'JetBrains Mono',monospace;font-size:11px}
-tr{transition:background .1s}tr:active{background:var(--cdh)}
+td{padding:10px;border-bottom:1px solid var(--bd);white-space:nowrap;font-family:'JetBrains Mono',monospace;font-size:11px}
+tr{transition:background .1s}tr:hover{background:var(--cdh)}
 .sn{font-family:'DM Sans',sans-serif}.sns{font-weight:700;font-size:12px;color:var(--t1)}.snn{font-size:9px;color:var(--t3)}
-.pb{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;background:rgba(139,92,246,.12);color:var(--pu);margin-left:4px}
+.pb{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;background:rgba(124,58,237,.08);color:var(--pu);margin-left:4px}
 .itag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;margin-left:3px}
-.itag-n50{background:rgba(124,58,237,.15);color:#a78bfa}
-.itag-n100{background:rgba(6,182,212,.15);color:var(--cy)}
-.itag-bse{background:rgba(249,115,22,.15);color:var(--or)}
+.itag-n50{background:rgba(124,58,237,.1);color:#7c3aed}
+.itag-n100{background:rgba(8,145,178,.1);color:var(--cy)}
+.itag-bse{background:rgba(234,88,12,.1);color:var(--or)}
 .score{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;cursor:pointer;display:inline-block;min-width:40px;text-align:center}
-.score-buy{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.25)}.score-buy.strong{background:rgba(16,185,129,.2);box-shadow:0 0 8px rgba(16,185,129,.15)}
-.score-sell{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.25)}
-.ds{display:flex;gap:3px}.d{width:6px;height:6px;border-radius:50%;flex-shrink:0}.d.p{background:var(--rd);box-shadow:0 0 4px rgba(239,68,68,.4)}.d.f{background:var(--t3);opacity:.2}
+.score-buy{background:var(--gg);color:var(--gn);border:1px solid rgba(5,150,105,.2)}.score-buy.strong{background:rgba(5,150,105,.12);box-shadow:0 0 8px rgba(5,150,105,.1)}
+.score-sell{background:var(--rg);color:var(--rd);border:1px solid rgba(220,38,38,.2)}
+.ds{display:flex;gap:3px}.d{width:6px;height:6px;border-radius:50%;flex-shrink:0}.d.p{background:var(--rd);box-shadow:0 0 4px rgba(220,38,38,.3)}.d.f{background:var(--bd2);opacity:.4}
 .rr{font-size:10px;font-weight:600}.rr-good{color:var(--gn)}.rr-ok{color:var(--am)}.rr-bad{color:var(--rd)}
-.macd-slope{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:3px}
-.slope-up{color:var(--gn)}.slope-dn{color:var(--rd)}.slope-flat{color:var(--t3)}
 .sig{padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.3px}
-.sig-b{background:var(--gg);color:var(--gn);border:1px solid rgba(16,185,129,.2)}.sig-mb{background:rgba(6,182,212,.1);color:var(--cy);border:1px solid rgba(6,182,212,.2)}.sig-s{background:var(--rg);color:var(--rd);border:1px solid rgba(239,68,68,.2)}.sig-h{background:rgba(100,116,139,.06);color:var(--t3);border:1px solid rgba(100,116,139,.1)}
-/* Modal */
-.mo{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fi .15s}
+.sig-b{background:var(--gg);color:var(--gn);border:1px solid rgba(5,150,105,.15)}.sig-mb{background:rgba(8,145,178,.08);color:var(--cy);border:1px solid rgba(8,145,178,.15)}.sig-s{background:var(--rg);color:var(--rd);border:1px solid rgba(220,38,38,.15)}.sig-h{background:rgba(148,163,184,.06);color:var(--t3);border:1px solid rgba(148,163,184,.15)}
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.3);backdrop-filter:blur(8px);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fi .15s}
 @media(min-width:768px){.mo{align-items:center;padding:24px}}@keyframes fi{from{opacity:0}to{opacity:1}}
-.moc{background:var(--cd);border:1px solid var(--bd2);border-radius:14px 14px 0 0;width:100%;max-height:88dvh;overflow-y:auto;animation:su .2s ease}
-@media(min-width:768px){.moc{max-width:680px;border-radius:14px;max-height:85vh}}@keyframes su{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.moc{background:var(--cd);border:1px solid var(--bd);border-radius:14px 14px 0 0;width:100%;max-height:88dvh;overflow-y:auto;animation:su .2s ease;box-shadow:0 -4px 24px rgba(0,0,0,.1)}
+@media(min-width:768px){.moc{max-width:680px;border-radius:14px;max-height:85vh;box-shadow:0 8px 32px rgba(0,0,0,.12)}}@keyframes su{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 .moh{padding:16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:flex-start;position:sticky;top:0;background:var(--cd);z-index:1}
 .mox{width:26px;height:26px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t3);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .mob{padding:16px}
@@ -74,20 +69,17 @@ tr{transition:background .1s}tr:active{background:var(--cdh)}
 .ict{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--t2)}
 .ics{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px}.ics.p{background:var(--gg);color:var(--gn)}.ics.f{background:var(--rg);color:var(--rd)}
 .icv{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace}.icd{font-size:9px;color:var(--t3);margin-top:3px}
-.sbar{width:100%;height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden;margin-top:4px}.sbar-f{height:100%;border-radius:4px;transition:width .3s}
+.sbar{width:100%;height:8px;background:rgba(0,0,0,.04);border-radius:4px;overflow:hidden;margin-top:4px}.sbar-f{height:100%;border-radius:4px;transition:width .3s}
 .sr-row{display:flex;gap:10px;margin-top:12px;padding:12px;background:var(--bg2);border:1px solid var(--bd);border-radius:8px}.sr-item{flex:1;text-align:center}.sr-label{font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.4px}.sr-val{font-size:16px;font-weight:800;font-family:'JetBrains Mono',monospace;margin-top:2px}
-/* Watchlist */
 .wl-bar{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
-.wl-chip{padding:5px 12px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(139,92,246,.3);background:rgba(139,92,246,.08);color:var(--pu);display:flex;align-items:center;gap:5px}
+.wl-chip{padding:5px 12px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(124,58,237,.25);background:rgba(124,58,237,.05);color:var(--pu);display:flex;align-items:center;gap:5px}
 .wl-chip.a{background:var(--pu);color:#fff;border-color:var(--pu)}
 .wl-chip .x{font-size:13px;opacity:.6;cursor:pointer;margin-left:2px}.wl-chip .x:hover{opacity:1}
 .wl-add-btn{padding:5px 10px;border-radius:16px;font-size:11px;font-weight:600;cursor:pointer;border:1px dashed var(--bd2);background:transparent;color:var(--t3)}
-.wl-input{padding:5px 10px;border-radius:16px;font-size:11px;border:1px solid var(--pu);background:var(--bg2);color:var(--t1);outline:none;width:120px}
-/* Scan progress */
-.scan-bar{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px}
-.scan-prog{flex:1;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}.scan-fill{height:100%;background:var(--gn);border-radius:3px;transition:width .5s}
+.wl-input{padding:5px 10px;border-radius:16px;font-size:11px;border:1px solid var(--pu);background:var(--cd);color:var(--t1);outline:none;width:120px}
+.scan-bar{background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.scan-prog{flex:1;height:6px;background:rgba(0,0,0,.05);border-radius:3px;overflow:hidden}.scan-fill{height:100%;background:var(--gn);border-radius:3px;transition:width .5s}
 .scan-txt{font-size:10px;color:var(--t2);font-family:'JetBrains Mono',monospace;white-space:nowrap}
-/* Setup */
 .setup{text-align:center;padding:50px 20px;max-width:460px;margin:0 auto}.setup h2{font-size:18px;margin:12px 0 8px}.setup p{color:var(--t2);font-size:13px;line-height:1.6;margin-bottom:14px}.setup code{display:block;background:var(--bg2);border:1px solid var(--bd);border-radius:7px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--gn);text-align:left;margin:10px 0;white-space:pre;overflow-x:auto}
 .miss{display:inline-block;padding:2px 8px;border-radius:4px;background:var(--rg);color:var(--rd);font-size:11px;font-weight:600;margin:2px}
 .ld{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 0;color:var(--t3)}
@@ -105,75 +97,114 @@ tr{transition:background .1s}tr:active{background:var(--cdh)}
 const {useState,useEffect,useCallback,useMemo,useRef}=React;
 const API=window.location.origin;
 const fmt=(n,d=2)=>n!=null?Number(n).toFixed(d):'—';
-const ago=(iso)=>{if(!iso)return'Never';const d=(Date.now()-new Date(iso).getTime())/1e3;if(d<60)return`${Math.floor(d)}s`;if(d<3600)return`${Math.floor(d/60)}m`;return`${Math.floor(d/3600)}h`};
+const ago=(iso)=>{if(!iso)return'Never';const d=(Date.now()-new Date(iso).getTime())/1e3;if(d<60)return Math.floor(d)+'s';if(d<3600)return Math.floor(d/60)+'m';return Math.floor(d/3600)+'h'};
 const ITAG_CLS={"NIFTY 50":"itag-n50","NIFTY 100":"itag-n100","BSE 100":"itag-bse"};
+const PH_COL={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
 
 function loadWL(){try{return JSON.parse(localStorage.getItem('ss_watchlists'))||{}}catch(e){return{}}}
 function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
 
-function ITags({indices}){if(!indices||!indices.length)return null;return<>{indices.map(i=><span key={i}className={`itag ${ITAG_CLS[i]||'itag-other'}`}>{i}</span>)}</>}
-function SellDots({c}){return<div className="ds">{Object.keys(c).map(k=><div key={k}className={`d ${c[k]?'p':'f'}`}title={k}/>)}</div>}
-function RR({ratio}){if(!ratio||ratio<=0)return<span className="rr rr-bad">—</span>;const cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';return<span className={`rr ${cl}`}>{ratio.toFixed(1)}:1</span>}
+function ITags({indices}){
+  if(!indices||!indices.length)return null;
+  return React.createElement(React.Fragment,null,indices.map(function(i){return React.createElement('span',{key:i,className:'itag '+(ITAG_CLS[i]||'')},i)}));
+}
+
+function SellDots({c}){
+  if(!c)return null;
+  return <div className="ds">{Object.keys(c).map(function(k){return <div key={k} className={'d '+(c[k]?'p':'f')} title={k}/>})}</div>;
+}
+
+function RR({ratio}){
+  if(!ratio||ratio<=0)return <span className="rr rr-bad">—</span>;
+  var cl=ratio>=2?'rr-good':ratio>=1?'rr-ok':'rr-bad';
+  return <span className={'rr '+cl}>{ratio.toFixed(1)}:1</span>;
+}
+
 function MACDSlope({slope,phase,curve,zeroY}){
-  if(slope==null)return<span className="macd-slope slope-flat">—</span>;
-  const phaseColors={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
-  const col=phaseColors[phase]||"var(--t3)";
-  let pathD='';
+  if(slope==null)return <span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>;
+  var col=PH_COL[phase]||'var(--t3)';
+  var zy=typeof zeroY==='number'?zeroY:0.5;
+  var pathD='';
   if(curve&&curve.length>2){
-    const w=48,h=18;
-    const pts=curve.map((v,i)=>`${(i/(curve.length-1))*w},${h-v*h}`);
-    pathD=`M${pts.join(' L')}`;
+    var w=48,h=18;
+    var pts=curve.map(function(v,i){return (i/(curve.length-1))*w+','+(h-v*h)});
+    pathD='M'+pts.join(' L');
   }
-  const zy=zeroY!=null?zeroY:0.5;
-  return<div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-    {pathD&&<svg width="48"height="18"viewBox="0 0 48 18"style={{flexShrink:0}}>
-      <line x1="0"y1={18-zy*18}x2="48"y2={18-zy*18}stroke="var(--rd)"strokeWidth="0.5"strokeDasharray="2,2"opacity="0.5"/>
-      <path d={pathD}fill="none"stroke={col}strokeWidth="1.5"strokeLinecap="round"strokeLinejoin="round"/>
-      <circle cx={48}cy={18-(curve[curve.length-1]||0)*18}r="2"fill={col}/>
+  return <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+    {pathD && <svg width="48" height="18" viewBox="0 0 48 18" style={{flexShrink:0}}>
+      <line x1="0" y1={18-zy*18} x2="48" y2={18-zy*18} stroke="#dc2626" strokeWidth="1.5" strokeDasharray="2,2" opacity="0.6"/>
+      <path d={pathD} fill="none" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx={48} cy={18-(curve[curve.length-1]||0)*18} r="2" fill={col}/>
     </svg>}
-    <div style={{display:'flex',flexDirection:'column',gap:'0px'}}>
-      {phase&&<span style={{fontSize:'7px',fontWeight:700,color:col,letterSpacing:'.3px',lineHeight:'1.2'}}>{phase}</span>}
+    <div style={{display:'flex',flexDirection:'column'}}>
+      {phase && <span style={{fontSize:'7px',fontWeight:700,color:col,letterSpacing:'.3px',lineHeight:'1.2'}}>{phase}</span>}
       <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:col}}>{slope>0?'+':''}{slope.toFixed(2)}</span>
     </div>
-  </div>
+  </div>;
 }
 
 function PriceAccel({vel,accel,upDays}){
-  if(vel==null&&accel==null)return<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>;
-  const v=vel||0,a=accel||0,ud=upDays||0;
-  const aCol=a>0?'var(--gn)':a<0?'var(--rd)':'var(--t3)';
-  const vCol=v>0?'var(--gn)':v<0?'var(--rd)':'var(--t3)';
-  return<div style={{display:'flex',flexDirection:'column',gap:'0px'}}>
+  var v=typeof vel==='number'?vel:null;
+  var a=typeof accel==='number'?accel:null;
+  if(v===null&&a===null)return <span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>;
+  var vv=v||0, aa=a||0, ud=upDays||0;
+  var vCol=vv>0?'var(--gn)':vv<0?'var(--rd)':'var(--t3)';
+  var aCol=aa>0?'var(--gn)':aa<0?'var(--rd)':'var(--t3)';
+  return <div style={{display:'flex',flexDirection:'column'}}>
     <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
-      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:vCol,fontWeight:700}}>{v>0?'+':''}{v.toFixed(2)}%</span>
-      {ud>=3&&<span style={{fontSize:'7px',background:'var(--gg)',color:'var(--gn)',padding:'0 3px',borderRadius:'2px',fontWeight:700}}>↑{ud}d</span>}
+      <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:vCol,fontWeight:700}}>{vv>0?'+':''}{vv.toFixed(2)}%</span>
+      {ud>=3 && <span style={{fontSize:'7px',background:'var(--gg)',color:'var(--gn)',padding:'0 3px',borderRadius:'2px',fontWeight:700}}>{'↑'+ud+'d'}</span>}
     </div>
-    <span style={{fontSize:'7px',fontFamily:"'JetBrains Mono'",color:aCol}}>{a>0?'▲':a<0?'▼':'–'} {Math.abs(a).toFixed(3)}</span>
-  </div>
+    <span style={{fontSize:'7px',fontFamily:"'JetBrains Mono'",color:aCol}}>{aa>0?'▲':aa<0?'▼':'–'} {Math.abs(aa).toFixed(3)}</span>
+  </div>;
 }
 
-function Modal({s,onClose,watchlists,onAddToWL}){
+function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
   if(!s)return null;
-  const bb=s.buy_breakdown||{};const sc=s.sell_conditions||{};
-  const indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv"];
-  const sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI ≥ 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope ↓',d:'Slope flipped negative'}];
-  const wlNames=Object.keys(watchlists);
-  return<div className="mo"onClick={onClose}><div className="moc"onClick={e=>e.stopPropagation()}>
+  var bb=s.buy_breakdown||{};
+  var sc=s.sell_conditions||{};
+  var indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv"];
+  var sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI >= 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope',d:'Slope flipped negative'}];
+  var wlNames=Object.keys(watchlists);
+  var pc=PH_COL[s.macd_phase]||'var(--t3)';
+  var cv=s.macd_curve||[];
+  var zy=typeof s.macd_zero_y==='number'?s.macd_zero_y:0.5;
+
+  // Build large MACD chart
+  var macdChart=null;
+  if(cv.length>2){
+    var W=260,H=50;
+    var pts=cv.map(function(v,i){return (i/(cv.length-1))*W+','+(H-v*H)});
+    var pd='M'+pts.join(' L');
+    var zly=H-zy*H;
+    macdChart=<svg width="100%" height="50" viewBox={'0 0 '+W+' '+H} preserveAspectRatio="none" style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.03)'}}>
+      <line x1="0" y1={zly} x2={W} y2={zly} stroke="#dc2626" strokeWidth="2" strokeDasharray="4,3" opacity="0.6"/>
+      <text x="3" y={Math.max(8,zly-3)} fill="var(--t3)" fontSize="6">0</text>
+      <path d={pd} fill="none" stroke={pc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx={W} cy={H-(cv[cv.length-1]||0)*H} r="3" fill={pc}/>
+    </svg>;
+  }
+
+  return <div className="mo" onClick={onClose}><div className="moc" onClick={function(e){e.stopPropagation()}}>
     <div className="moh"><div>
       <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}}>
         <span style={{fontSize:'17px',fontWeight:800}}>{s.name}</span>
         <span style={{fontSize:'11px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}}>{s.symbol}</span>
-        {s.in_portfolio&&<span className="pb">HELD</span>}
+        {s.in_portfolio && <span className="pb">HELD</span>}
       </div>
       <div style={{marginTop:'4px'}}>{s.indices&&s.indices.length>0?<><span style={{fontSize:'9px',color:'var(--t3)',marginRight:'4px'}}>Listed in:</span><ITags indices={s.indices}/></>:<span style={{fontSize:'9px',color:'var(--t3)'}}>NIFTY 500</span>}</div>
-      <div style={{marginTop:'4px',fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}>₹{fmt(s.price)}</div>
-      {wlNames.length>0&&<div style={{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'}}>
-        {wlNames.map(wn=>{const inIt=watchlists[wn]?.includes(s.symbol);
-          return<button key={wn}className={`btn btn-sm ${inIt?'btn-r':'btn-pu'}`}onClick={e=>{e.stopPropagation();onAddToWL(wn,s.symbol,!inIt)}}>{inIt?`✕ ${wn}`:`+ ${wn}`}</button>
+      <div style={{marginTop:'4px',fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}>{'₹'+fmt(s.price)}</div>
+      {wlNames.length>0 && <div style={{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'}}>
+        {wlNames.map(function(wn){var inIt=watchlists[wn]&&watchlists[wn].includes(s.symbol);
+          return <button key={wn} className={'btn btn-sm '+(inIt?'btn-r':'btn-pu')} onClick={function(e){e.stopPropagation();onAddToWL(wn,s.symbol,!inIt)}}>{inIt?('✕ '+wn):('+ '+wn)}</button>
         })}
       </div>}
-    </div><button className="mox"onClick={onClose}>✕</button></div>
+    </div><button className="mox" onClick={onClose}>✕</button></div>
     <div className="mob">
+      {isGolden && <div style={{padding:'12px',marginBottom:'12px',background:'linear-gradient(135deg,rgba(217,119,6,.1),rgba(234,179,8,.08))',border:'2px solid rgba(217,119,6,.3)',borderRadius:'8px',textAlign:'center'}}>
+        <div style={{fontSize:'18px',fontWeight:800,color:'#b45309'}}>{'★ GOLDEN BUY OPPORTUNITY ★'}</div>
+        <div style={{fontSize:'10px',color:'#92400e',marginTop:'4px'}}>{'MACD dipped near 1Y low · slope flat · SMA(200) rising'}</div>
+      </div>}
       <div style={{display:'flex',gap:'10px',marginBottom:'16px'}}>
         <div style={{flex:1,padding:'14px',background:'var(--gg)',borderRadius:'8px',textAlign:'center'}}>
           <div style={{fontSize:'9px',fontWeight:700,color:'var(--gn)',letterSpacing:'.5px'}}>BUY SCORE</div>
@@ -187,319 +218,336 @@ function Modal({s,onClose,watchlists,onAddToWL}){
         </div>
       </div>
       <div className="sr-row">
-        <div className="sr-item"><div className="sr-label">Support</div><div className="sr-val"style={{color:'var(--gn)'}}>₹{fmt(s.support)}</div></div>
-        <div className="sr-item"><div className="sr-label">Resistance</div><div className="sr-val"style={{color:'var(--rd)'}}>₹{fmt(s.resistance)}</div></div>
+        <div className="sr-item"><div className="sr-label">Support</div><div className="sr-val" style={{color:'var(--gn)'}}>{'₹'+fmt(s.support)}</div></div>
+        <div className="sr-item"><div className="sr-label">Resistance</div><div className="sr-val" style={{color:'var(--rd)'}}>{'₹'+fmt(s.resistance)}</div></div>
         <div className="sr-item"><div className="sr-label">R:R</div><div className="sr-val"><RR ratio={s.rr_ratio}/></div></div>
       </div>
-      {/* MACD Momentum Phase */}
-      {(()=>{
-        const phC={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
-        const pc=phC[s.macd_phase]||"var(--t3)";
-        return<div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'6px'}}>MACD MOMENTUM ANALYSIS</div>
-          {(()=>{
-            const cv=s.macd_curve||[];
-            if(cv.length<3)return null;
-            const w=260,h=50;
-            const pts=cv.map((v,i)=>`${(i/(cv.length-1))*w},${h-v*h}`);
-            const pathD=`M${pts.join(' L')}`;
-            const zy=s.macd_zero_y!=null?s.macd_zero_y:0.5;
-            const zeroLineY=h-zy*h;
-            return<svg width="100%"height="50"viewBox={`0 0 ${w} ${h}`}preserveAspectRatio="none"style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.2)'}}>
-              <line x1="0"y1={zeroLineY}x2={w}y2={zeroLineY}stroke="var(--rd)"strokeWidth="0.7"strokeDasharray="3,3"opacity="0.5"/>
-              <text x="3"y={zeroLineY-3}fill="var(--t3)"fontSize="6">0</text>
-              <path d={pathD}fill="none"stroke={pc}strokeWidth="2"strokeLinecap="round"strokeLinejoin="round"/>
-              <circle cx={w}cy={h-(cv[cv.length-1]||0)*h}r="3"fill={pc}/>
-            </svg>
-            </svg>
-          })()}
-          <div style={{display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
-            <div style={{padding:'6px 14px',background:pc+'18',borderRadius:'6px',border:`1px solid ${pc}40`}}>
-              <div style={{fontSize:'14px',fontWeight:800,color:pc}}>{s.macd_phase||'—'}</div>
-            </div>
-            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d(MACD)/dt</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_slope>0?'var(--gn)':s.macd_slope<0?'var(--rd)':'var(--t3)'}}>{s.macd_slope!=null?(s.macd_slope>0?'+':'')+s.macd_slope.toFixed(4):'—'}</div></div>
-            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d²(MACD)/dt²</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_accel>0?'var(--gn)':s.macd_accel<0?'var(--rd)':'var(--t3)'}}>{s.macd_accel!=null?(s.macd_accel>0?'+':'')+s.macd_accel.toFixed(4):'—'}</div></div>
+
+      {/* MACD */}
+      <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'6px'}}>MACD MOMENTUM ANALYSIS</div>
+        {macdChart}
+        <div style={{display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
+          <div style={{padding:'6px 14px',background:pc+'18',borderRadius:'6px',border:'1px solid '+pc+'40'}}>
+            <div style={{fontSize:'14px',fontWeight:800,color:pc}}>{s.macd_phase||'—'}</div>
           </div>
-          <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
-            {s.macd_phase==='BUY FLIP'&&'Slope just crossed zero upward — momentum confirmed bullish'}
-            {s.macd_phase==='EARLY BUY'&&'Decline decelerating (d²>0 while d<0) — potential bottom forming'}
-            {s.macd_phase==='SELL FLIP'&&'Slope just crossed zero downward — momentum confirmed bearish'}
-            {s.macd_phase==='EARLY SELL'&&'Rise decelerating (d²<0 while d>0) — potential top forming'}
-            {s.macd_phase==='BULLISH'&&'Rising momentum with positive acceleration — strong uptrend'}
-            {s.macd_phase==='BEARISH'&&'Falling momentum with negative acceleration — strong downtrend'}
-          </div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d(MACD)/dt</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_slope>0?'var(--gn)':s.macd_slope<0?'var(--rd)':'var(--t3)'}}>{s.macd_slope!=null?(s.macd_slope>0?'+':'')+s.macd_slope.toFixed(4):'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d²(MACD)/dt²'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_accel>0?'var(--gn)':s.macd_accel<0?'var(--rd)':'var(--t3)'}}>{s.macd_accel!=null?(s.macd_accel>0?'+':'')+s.macd_accel.toFixed(4):'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>MACD % of 1Y low</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:typeof s.macd_low_pct==='number'?(s.macd_low_pct>=60?'var(--rd)':'var(--t2)'):'var(--t3)'}}>{typeof s.macd_low_pct==='number'?s.macd_low_pct.toFixed(0)+'%':'—'}</div><div style={{fontSize:'7px',color:'var(--t3)'}}>{typeof s.macd_1y_low==='number'?'1Y low: '+s.macd_1y_low.toFixed(1):''}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d(SMA200)/dt'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.sma200_slope>0?'var(--gn)':s.sma200_slope<0?'var(--rd)':'var(--t3)'}}>{typeof s.sma200_slope==='number'?(s.sma200_slope>0?'+':'')+s.sma200_slope.toFixed(3):'—'}</div></div>
         </div>
-      })()}
+        <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
+          {s.macd_phase==='BUY FLIP'&&'Slope just crossed zero upward — momentum confirmed bullish'}
+          {s.macd_phase==='EARLY BUY'&&'Decline decelerating — potential bottom forming'}
+          {s.macd_phase==='SELL FLIP'&&'Slope just crossed zero downward — momentum confirmed bearish'}
+          {s.macd_phase==='EARLY SELL'&&'Rise decelerating — potential top forming'}
+          {s.macd_phase==='BULLISH'&&'Rising momentum with positive acceleration'}
+          {s.macd_phase==='BEARISH'&&'Falling momentum with negative acceleration'}
+        </div>
+      </div>
+
       {/* Price Dynamics */}
       <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
         <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'8px'}}>PRICE DYNAMICS</div>
         <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
-          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Daily Δ (velocity)</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_vel>0?'var(--gn)':s.price_vel<0?'var(--rd)':'var(--t3)'}}>{s.price_vel!=null?(s.price_vel>0?'+':'')+s.price_vel.toFixed(2)+'%':'—'}</div></div>
-          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Acceleration (d²P/dt²)</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_accel>0?'var(--gn)':s.price_accel<0?'var(--rd)':'var(--t3)'}}>{s.price_accel!=null?(s.price_accel>0?'+':'')+s.price_accel.toFixed(3)+'%':'—'}</div></div>
-          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>3-day ROC</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_roc3>0?'var(--gn)':s.price_roc3<0?'var(--rd)':'var(--t3)'}}>{s.price_roc3!=null?(s.price_roc3>0?'+':'')+s.price_roc3.toFixed(2)+'%':'—'}</div></div>
-          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Consecutive Up</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.up_days>=3?'var(--gn)':'var(--t2)'}}>{s.up_days||0} days</div></div>
-        </div>
-        <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
-          {s.price_accel>0&&s.price_vel>0&&'Price rising and accelerating — strong buying pressure'}
-          {s.price_accel>0&&s.price_vel<0&&'Price still falling but deceleration starting — potential reversal'}
-          {s.price_accel<0&&s.price_vel>0&&'Price rising but losing steam — momentum fading'}
-          {s.price_accel<0&&s.price_vel<0&&'Price falling and accelerating down — strong selling pressure'}
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Daily velocity</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_vel>0?'var(--gn)':s.price_vel<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_vel==='number'?(s.price_vel>0?'+':'')+s.price_vel.toFixed(2)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Acceleration</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_accel>0?'var(--gn)':s.price_accel<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_accel==='number'?(s.price_accel>0?'+':'')+s.price_accel.toFixed(3)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>3-day ROC</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_roc3>0?'var(--gn)':s.price_roc3<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_roc3==='number'?(s.price_roc3>0?'+':'')+s.price_roc3.toFixed(2)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Up streak</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:(s.up_days||0)>=3?'var(--gn)':'var(--t2)'}}>{(s.up_days||0)+' days'}</div></div>
         </div>
       </div>
+
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
-      <div className="ig"style={{marginBottom:'16px'}}>{indicators.map(k=>{const b=bb[k];if(!b)return null;const pct=b.max>0?(b.pts/b.max*100):0;
-        return<div className="ic"key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={`ics ${b.pass?'p':'f'}`}>{b.pts}/{b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f"style={{width:`${pct}%`,background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
+      <div className="ig" style={{marginBottom:'16px'}}>{indicators.map(function(k){var b=bb[k];if(!b)return null;var pct=b.max>0?(b.pts/b.max*100):0;
+        return <div className="ic" key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={'ics '+(b.pass?'p':'f')}>{b.pts+'/'+b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f" style={{width:pct+'%',background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
       })}</div>
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--rd)',marginBottom:'8px'}}>SELL INDICATORS</h3>
-      <div className="ig">{sellI.map(i=><div className="ic"key={i.k}><div className="ich"><span className="ict">{i.t}</span><span className={`ics ${sc[i.k]?'p':'f'}`}>{sc[i.k]?'✓':'✗'}</span></div><div className="icd">{i.d}</div></div>)}</div>
+      <div className="ig">{sellI.map(function(i){return <div className="ic" key={i.k}><div className="ich"><span className="ict">{i.t}</span><span className={'ics '+(sc[i.k]?'p':'f')}>{sc[i.k]?'✓':'✗'}</span></div><div className="icd">{i.d}</div></div>})}</div>
     </div>
-  </div></div>
+  </div></div>;
 }
 
 function App(){
-  const[data,setData]=useState(null);const[status,setStatus]=useState(null);const[loading,setLoading]=useState(true);
-  const[progress,setProgress]=useState(null);
-  const[tab,setTab]=useState('all');const[search,setSearch]=useState('');const[sortK,setSortK]=useState('buy_score');const[sortA,setSortA]=useState(false);const[sel,setSel]=useState(null);
-  const[watchlists,setWatchlists]=useState(loadWL);
-  const[activeWL,setActiveWL]=useState(null);
-  const[addingWL,setAddingWL]=useState(false);
-  const[newWLName,setNewWLName]=useState('');
-  const inputRef=useRef(null);
+  var [data,setData]=useState(null);
+  var [status,setStatus]=useState(null);
+  var [loading,setLoading]=useState(true);
+  var [progress,setProgress]=useState(null);
+  var [tab,setTab]=useState('all');
+  var [search,setSearch]=useState('');
+  var [sortK,setSortK]=useState('buy_score');
+  var [sortA,setSortA]=useState(false);
+  var [sel,setSel]=useState(null);
+  var [watchlists,setWatchlists]=useState(loadWL);
+  var [activeWL,setActiveWL]=useState(null);
+  var [addingWL,setAddingWL]=useState(false);
+  var [newWLName,setNewWLName]=useState('');
+  var [scanError,setScanError]=useState(null);
+  var [gbPctl,setGbPctl]=useState(60);
+  var [gbSlopeMin,setGbSlopeMin]=useState(-0.5);
+  var [gbSlopeMax,setGbSlopeMax]=useState(0.2);
+  var [gbSmaSlope,setGbSmaSlope]=useState(0.1);
+  var inputRef=useRef(null);
+  var scanRef=useRef(false);
 
-  const setAndSaveWL=(w)=>{setWatchlists(w);saveWL(w)};
-  const createWL=(name)=>{if(!name.trim())return;const w={...watchlists,[name.trim()]:[]};setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
-  const deleteWL=(name)=>{const w={...watchlists};delete w[name];setAndSaveWL(w);if(activeWL===name)setActiveWL(null)};
-  const toggleInWL=(wlName,symbol,add)=>{const w={...watchlists};if(!w[wlName])w[wlName]=[];if(add&&!w[wlName].includes(symbol))w[wlName].push(symbol);if(!add)w[wlName]=w[wlName].filter(s=>s!==symbol);setAndSaveWL(w)};
+  var setAndSaveWL=function(w){setWatchlists(w);saveWL(w)};
+  var createWL=function(name){if(!name.trim())return;var w=Object.assign({},watchlists);w[name.trim()]=[];setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
+  var deleteWL=function(name){var w=Object.assign({},watchlists);delete w[name];setAndSaveWL(w);if(activeWL===name)setActiveWL(null)};
+  var toggleInWL=function(wlName,symbol,add){var w=Object.assign({},watchlists);if(!w[wlName])w[wlName]=[];if(add&&!w[wlName].includes(symbol))w[wlName].push(symbol);if(!add)w[wlName]=w[wlName].filter(function(s){return s!==symbol});setAndSaveWL(w)};
 
-  useEffect(()=>{if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
+  useEffect(function(){if(addingWL&&inputRef.current)inputRef.current.focus()},[addingWL]);
 
-  const fetchAll=useCallback(async()=>{try{const[r1,r2,r3]=await Promise.all([fetch(`${API}/api/results`),fetch(`${API}/api/status`),fetch(`${API}/api/progress`)]);setData(await r1.json());setStatus(await r2.json());setProgress(await r3.json())}catch(e){}finally{setLoading(false)}},[]);
-  const scanningRef=useRef(false);
-  useEffect(()=>{scanningRef.current=data?.status==='scanning'||status?.is_scanning||false},[data,status]);
-  useEffect(()=>{fetchAll();const t=setInterval(()=>fetchAll(),scanningRef.current?5000:15000);return()=>clearInterval(t)},[fetchAll]);
-  const[scanError,setScanError]=useState(null);
+  var fetchAll=useCallback(function(){
+    return Promise.all([fetch(API+'/api/results'),fetch(API+'/api/status'),fetch(API+'/api/progress')])
+      .then(function(res){return Promise.all(res.map(function(r){return r.json()}))})
+      .then(function(arr){setData(arr[0]);setStatus(arr[1]);setProgress(arr[2]);scanRef.current=!!(arr[0]&&arr[0].status==='scanning')||!!(arr[1]&&arr[1].is_scanning)})
+      .catch(function(){})
+      .finally(function(){setLoading(false)});
+  },[]);
 
-  const triggerScan=async()=>{
+  useEffect(function(){
+    fetchAll();
+    var t=setInterval(function(){fetchAll()},5000);
+    return function(){clearInterval(t)};
+  },[fetchAll]);
+
+  var triggerScan=function(){
     setScanError(null);
-    try{
-      const r=await fetch(`${API}/api/scan`,{method:'POST'});
-      const j=await r.json();
-      if(!r.ok){setScanError(j.error||'Scan failed');return}
-      fetchAll();
-    }catch(e){setScanError('Network error')}
+    fetch(API+'/api/scan',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(j.error)setScanError(j.error);fetchAll()}).catch(function(){setScanError('Network error')});
   };
-  const reconnect=async()=>{
+  var reconnect=function(){
     setScanError(null);
-    try{
-      const r=await fetch(`${API}/api/reconnect`,{method:'POST'});
-      const j=await r.json();
-      if(!r.ok){setScanError(j.error||'Reconnect failed');return}
-      setScanError(null);
-      fetchAll();
-    }catch(e){setScanError('Network error')}
+    fetch(API+'/api/reconnect',{method:'POST'}).then(function(r){return r.json()}).then(function(){setScanError(null);fetchAll()}).catch(function(){setScanError('Network error')});
   };
-  const stopScan=async()=>{
-    try{await fetch(`${API}/api/stop`,{method:'POST'});setTimeout(fetchAll,1000)}catch(e){}
+  var stopScan=function(){
+    fetch(API+'/api/stop',{method:'POST'}).then(function(){setTimeout(fetchAll,1000)}).catch(function(){});
   };
-  const resetAndRescan=async()=>{
+  var resetAndRescan=function(){
     setScanError(null);
-    try{
-      const r=await fetch(`${API}/api/reset`,{method:'POST'});
-      const j=await r.json();
-      if(!r.ok){setScanError(j.error||'Reset failed');return}
+    fetch(API+'/api/reset',{method:'POST'}).then(function(r){return r.json()}).then(function(){
       fetchAll();
-      // Auto-trigger new scan after reset
-      setTimeout(async()=>{
-        await fetch(`${API}/api/scan`,{method:'POST'});
-        fetchAll();
-      },500);
-    }catch(e){setScanError('Network error')}
+      setTimeout(function(){fetch(API+'/api/scan',{method:'POST'}).then(function(){fetchAll()})},500);
+    }).catch(function(){setScanError('Network error')});
   };
-  const doSort=(k)=>{if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
+  var doSort=function(k){if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
 
-  const stocks=useMemo(()=>{
+  var allStocks=(data&&data.all_stocks)||[];
+  var nT=allStocks.length||((data&&data.total_scanned)||0);
+  var isSc=!!(data&&data.status==='scanning')||!!(status&&status.is_scanning);
+  var instCount=(status&&status.instruments_scan)||0;
+
+  var goldenMatch=function(s){
+    var lowPct=typeof s.macd_low_pct==='number'?s.macd_low_pct:0;
+    var slope=typeof s.macd_slope==='number'?s.macd_slope:999;
+    var smaS=typeof s.sma200_slope==='number'?s.sma200_slope:0;
+    return lowPct>=gbPctl && slope>=gbSlopeMin && slope<=gbSlopeMax && smaS>gbSmaSlope;
+  };
+
+  var stocks=useMemo(function(){
     if(!data)return[];
-    let l=tab==='buy'?data.buy_signals||[]
-      :tab==='sell'?data.sell_signals||[]
-      :tab==='port'?(data.all_stocks||[]).filter(s=>s.in_portfolio)
-      :tab==='setups'?(data.all_stocks||[]).filter(s=>{
-        const smaOk=s.buy_breakdown?.sma200?.pass;
-        const macdFlip=s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY';
-        return smaOk&&macdFlip;
+    var l=tab==='buy'?(data.buy_signals||[])
+      :tab==='sell'?(data.sell_signals||[])
+      :tab==='port'?allStocks.filter(function(s){return s.in_portfolio})
+      :tab==='setups'?allStocks.filter(function(s){
+        if(goldenMatch(s))return true;
+        var smaOk=s.buy_breakdown&&s.buy_breakdown.sma200&&s.buy_breakdown.sma200.pass;
+        var macdOk=s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY';
+        return smaOk&&macdOk;
       })
-      :data.all_stocks||[];
+      :allStocks;
     if(activeWL){
-      const syms=watchlists[activeWL]||[];
-      l=(data.all_stocks||[]).filter(s=>syms.includes(s.symbol));
+      var syms=watchlists[activeWL]||[];
+      l=allStocks.filter(function(s){return syms.includes(s.symbol)});
     }
-    if(search){const q=search.toLowerCase();l=l.filter(s=>s.symbol.toLowerCase().includes(q)||s.name.toLowerCase().includes(q))}
-    return[...l].sort((a,b)=>{const va=a[sortK],vb=b[sortK];if(va==null)return 1;if(vb==null)return-1;return sortA?(va>vb?1:-1):(va<vb?1:-1)})
-  },[data,activeWL,watchlists,tab,search,sortK,sortA]);
+    if(search){var q=search.toLowerCase();l=l.filter(function(s){return s.symbol.toLowerCase().includes(q)||s.name.toLowerCase().includes(q)})}
+    return l.slice().sort(function(a,b){var va=a[sortK],vb=b[sortK];if(va==null)return 1;if(vb==null)return-1;return sortA?(va>vb?1:-1):(va<vb?1:-1)});
+  },[data,activeWL,watchlists,tab,search,sortK,sortA,gbPctl,gbSlopeMin,gbSlopeMax,gbSmaSlope]);
 
-  const filteredCounts=useMemo(()=>{
-    if(!data)return{all:0,buy:0,sell:0,port:0,setups:0};
-    const f=s=>{
-      if(activeWL)return(watchlists[activeWL]||[]).includes(s.symbol);
-      return true;
+  var filteredCounts=useMemo(function(){
+    if(!data)return{all:0,buy:0,sell:0,port:0,setups:0,golden:0};
+    var setupF=function(s){
+      if(goldenMatch(s))return true;
+      return s.buy_breakdown&&s.buy_breakdown.sma200&&s.buy_breakdown.sma200.pass&&(s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY');
     };
-    const setupFilter=s=>{
-      const smaOk=s.buy_breakdown?.sma200?.pass;
-      const macdFlip=s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY';
-      return smaOk&&macdFlip;
+    var goldenCount=allStocks.filter(goldenMatch).length;
+    return{
+      all:allStocks.length,
+      buy:(data.buy_signals||[]).length,
+      sell:(data.sell_signals||[]).length,
+      port:allStocks.filter(function(s){return s.in_portfolio}).length,
+      setups:allStocks.filter(setupF).length,
+      golden:goldenCount
     };
-    return{all:(data.all_stocks||[]).filter(f).length,buy:(data.buy_signals||[]).filter(f).length,sell:(data.sell_signals||[]).filter(f).length,port:(data.all_stocks||[]).filter(s=>s.in_portfolio&&f(s)).length,setups:(data.all_stocks||[]).filter(s=>setupFilter(s)&&f(s)).length}
-  },[data,activeWL,watchlists]);
+  },[data,gbPctl,gbSlopeMin,gbSlopeMax,gbSmaSlope]);
 
-  if(loading)return<div className="ld"><div className="sp"/>Connecting...</div>;
-  if(status&&!status.connected&&status.missing?.length>0){
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="bdg"><div className="dot off"/>OFFLINE</div></div></header><main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>🔐</div><h2>Credentials Required</h2><div>{status.missing.map(m=><span key={m}className="miss">{m}</span>)}</div><code>{`ANGEL_API_KEY=your_key\nANGEL_CLIENT_ID=your_id\nANGEL_PASSWORD=your_pin\nANGEL_TOTP_TOKEN=your_totp`}</code></div></main></>;
+  if(loading)return <div className="ld"><div className="sp"/>Connecting...</div>;
+
+  if(status&&!status.connected&&status.missing&&status.missing.length>0){
+    return <div><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="bdg"><div className="dot off"/>OFFLINE</div></div></header><main className="mn"><div className="setup"><div style={{fontSize:'40px'}}>🔐</div><h2>Credentials Required</h2><div>{status.missing.map(function(m){return <span key={m} className="miss">{m}</span>})}</div><code>{'ANGEL_API_KEY=your_key\nANGEL_CLIENT_ID=your_id\nANGEL_PASSWORD=your_pin\nANGEL_TOTP_TOKEN=your_totp'}</code></div></main></div>;
   }
 
-  const nT=data?.all_stocks?.length||data?.total_scanned||0;
-  const isSc=data?.status==='scanning'||status?.is_scanning;
-  const instCount=status?.instruments_scan||0;
-
-  const hasResults = nT > 0 || (data?.all_stocks?.length > 0);
-
-  if(!data || (!hasResults && !isSc) || (!data.last_scan && !isSc)){
-    const isConn=status?.connected;
-    return<><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr">
-      <div className="bdg"><div className={`dot ${isSc?'w':isConn?'on':'off'}`}/>{isSc?'SCANNING':isConn?'READY':'OFFLINE'}</div>
-      {!isSc&&isConn&&<button className="btn btn-g"onClick={triggerScan}>▶ Scan</button>}
-      {!isConn&&<button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button>}
+  // Show pre-scan screen only when no results AND not scanning
+  if(nT===0&&!isSc){
+    var isConn=status&&status.connected;
+    return <div><header className="hdr"><div className="hi"><div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div><div className="hr">
+      <div className="bdg"><div className={'dot '+(isConn?'on':'off')}/>{isConn?'READY':'OFFLINE'}</div>
+      {isConn && <button className="btn btn-g" onClick={triggerScan}>▶ Scan</button>}
+      {!isConn && <button className="btn" onClick={reconnect} style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button>}
     </div></div></header>
     <main className="mn"><div className="setup">
-      <div style={{fontSize:'40px'}}>{isSc?'⏳':isConn?'📊':'🔌'}</div>
-      <h2>{isSc?'Scanning...':isConn?'Ready to scan':'Connection failed'}</h2>
-      {!isConn&&!isSc&&<p style={{color:'var(--rd)'}}>Could not connect to Angel One. This usually happens if the API timed out or you were rate-limited. Click Reconnect to try again.</p>}
-      {isConn&&!isSc&&<p>NIFTY 500 · {instCount} stocks ready. Tap Scan to start.</p>}
-      {scanError&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'380px'}}>{scanError}</div>}
-      {!isConn&&!isSc&&<div style={{marginTop:'12px'}}><button className="btn"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000',padding:'10px 24px',fontSize:'13px'}}>🔌 Reconnect to Angel One</button></div>}
-      {isSc&&(()=>{
-        const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
-        return<>
-          <div style={{width:'80%',maxWidth:'300px',margin:'16px auto'}}>
-            <div style={{display:'flex',justifyContent:'space-between',marginBottom:'4px'}}>
-              <span style={{fontSize:'11px',color:'var(--t2)',fontFamily:"'JetBrains Mono'"}}>{p.current||0}/{p.total||'?'}</span>
-              <span style={{fontSize:'11px',color:'var(--gn)',fontFamily:"'JetBrains Mono'"}}>{pct}%</span>
-            </div>
-            <div className="scan-prog"style={{height:'8px'}}><div className="scan-fill"style={{width:`${pct}%`}}/></div>
-            {(p.ok>0||p.skipped>0)&&<p style={{fontSize:'10px',color:'var(--t3)',marginTop:'6px'}}>{p.ok} analyzed{p.skipped>0&&` · ${p.skipped} skipped (no data)`}{p.errors>0&&` · ${p.errors} errors`}</p>}
-          </div>
-          {p.rate_limited&&<div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'340px'}}>⚠ Rate limited by Angel One. Scan aborted. Wait ~1 min and retry.</div>}
-        </>
-      })()}
-    </div></main></>;
+      <div style={{fontSize:'40px'}}>{isConn?'📊':'🔌'}</div>
+      <h2>{isConn?'Ready to scan':'Connection failed'}</h2>
+      {isConn && <p>{'NIFTY 500 · '+(instCount||'?')+' stocks ready. Tap Scan to start.'}</p>}
+      {!isConn && <p style={{color:'var(--rd)'}}>Could not connect to Angel One. Click Reconnect to try again.</p>}
+      {scanError && <div style={{margin:'8px auto',padding:'8px 14px',background:'var(--rg)',borderRadius:'6px',fontSize:'11px',color:'var(--rd)',fontWeight:600,maxWidth:'380px'}}>{scanError}</div>}
+    </div></main></div>;
   }
 
-  const nB=(data.buy_signals||[]).length,nS=(data.sell_signals||[]).length,nP=(data.portfolio_holdings||[]).length;
-  const wlNames=Object.keys(watchlists);
-  const scanDur=data.scan_duration_sec?`${(data.scan_duration_sec/60).toFixed(0)}m`:'';
-  return<>
+  // Main dashboard (shown during scan + after scan)
+  var nB=(data&&data.buy_signals||[]).length;
+  var nS=(data&&data.sell_signals||[]).length;
+  var nP=allStocks.filter(function(s){return s.in_portfolio}).length;
+  var wlNames=Object.keys(watchlists);
+  var scanDur=data&&data.scan_duration_sec?Math.round(data.scan_duration_sec/60)+'m':'';
+
+  return <div>
     <header className="hdr"><div className="hi">
       <div className="logo"><div className="lic">S</div><div className="lt">SignalScope</div></div>
       <div className="hr">
-        <div className="bdg">{instCount||nT} stocks</div>
-        <div className="bdg"><div className={`dot ${isSc?'w':'on'}`}/>{isSc?'SCANNING':'LIVE'}</div>
-        <div className="bdg">{ago(data.last_scan)}{scanDur&&` · ${scanDur}`}</div>
-        {isSc?<button className="btn btn-r"onClick={stopScan}>⏹ Stop</button>
-        :<button className="btn btn-g"onClick={triggerScan}>▶</button>}
-        <button className="btn"onClick={resetAndRescan}style={{background:'rgba(249,115,22,.15)',color:'var(--or)',border:'1px solid rgba(249,115,22,.25)'}}>↻ Reset</button>
+        <div className="bdg">{(instCount||nT)+' stocks'}</div>
+        <div className="bdg"><div className={'dot '+(isSc?'w':'on')}/>{isSc?'SCANNING':'LIVE'}</div>
+        <div className="bdg">{ago(data&&data.last_scan)}{scanDur&&(' · '+scanDur)}</div>
+        {isSc?<button className="btn btn-r" onClick={stopScan}>⏹ Stop</button>
+        :<button className="btn btn-g" onClick={triggerScan}>▶</button>}
+        <button className="btn" onClick={resetAndRescan} style={{background:'rgba(249,115,22,.15)',color:'var(--or)',border:'1px solid rgba(249,115,22,.25)'}}>↻ Reset</button>
       </div>
     </div></header>
     <main className="mn">
-      {/* Stats */}
-      {scanError&&<div style={{padding:'8px 14px',background:'var(--rg)',borderRadius:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600,marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>{scanError}</span><button className="btn btn-sm"onClick={reconnect}style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button></div>}
+      {scanError && <div style={{padding:'8px 14px',background:'var(--rg)',borderRadius:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600,marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>{scanError}</span><button className="btn btn-sm" onClick={reconnect} style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button></div>}
+
       <div className="sts">
-        <div className="st"><div className="stl">NIFTY 500</div><div className="stv"style={{color:'var(--bl)'}}>{nT.toLocaleString()}</div><div className="sts2">{progress?.skipped||0} skipped</div></div>
-        <div className="st"><div className="stl">Buy Signals</div><div className="stv"style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">≥60/110</div></div>
-        <div className="st"><div className="stl">Sell</div><div className="stv"style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">≥3/6</div></div>
-        <div className="st"><div className="stl">Portfolio</div><div className="stv"style={{color:'var(--pu)'}}>{nP}</div></div>
+        <div className="st"><div className="stl">NIFTY 500</div><div className="stv" style={{color:'var(--bl)'}}>{nT}</div><div className="sts2">{(progress&&progress.skipped||0)+' skipped'}</div></div>
+        <div className="st"><div className="stl">Buy Signals</div><div className="stv" style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">{'≥60/110'}</div></div>
+        <div className="st"><div className="stl">Sell</div><div className="stv" style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">{'≥3/6'}</div></div>
+        <div className="st"><div className="stl">Portfolio</div><div className="stv" style={{color:'var(--pu)'}}>{nP}</div></div>
       </div>
 
-      {/* Scanning progress bar */}
-      {isSc&&(()=>{
-        const p=progress||{};const pct=p.total>0?Math.round(p.current/p.total*100):0;
-        return<div className="scan-bar"style={{flexDirection:'column',gap:'6px'}}>
+      {isSc && (function(){
+        var p=progress||{};var pct=p.total>0?Math.round(p.current/p.total*100):0;
+        return <div className="scan-bar" style={{flexDirection:'column',gap:'6px'}}>
           <div style={{display:'flex',alignItems:'center',gap:'8px',width:'100%'}}>
-            <div className="sp"style={{width:16,height:16,margin:0,borderWidth:2,flexShrink:0}}/>
+            <div className="sp" style={{width:16,height:16,margin:0,borderWidth:2,flexShrink:0}}/>
             <div style={{flex:1}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:'3px'}}>
-                <span className="scan-txt">{p.current||0}/{p.total||'?'} stocks</span>
-                <span className="scan-txt">{pct}%{p.ok>0&&` · ${p.ok} analyzed`}{p.skipped>0&&` · ${p.skipped} skipped`}{p.errors>0&&` · ${p.errors} errors`}</span>
+                <span className="scan-txt">{(p.current||0)+'/'+(p.total||'?')+' stocks'}</span>
+                <span className="scan-txt">{pct+'%'+(p.ok>0?' · '+p.ok+' analyzed':'')+(p.skipped>0?' · '+p.skipped+' skipped':'')+(p.errors>0?' · '+p.errors+' errors':'')}</span>
               </div>
-              <div className="scan-prog"><div className="scan-fill"style={{width:`${pct}%`}}/></div>
+              <div className="scan-prog"><div className="scan-fill" style={{width:pct+'%'}}/></div>
             </div>
           </div>
-          {p.rate_limited&&<div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <span>⚠ Rate limited by Angel One — scan paused/aborted.</span>
-            <button className="btn btn-sm"onClick={resetAndRescan}style={{background:'var(--or)',border:'none',color:'#fff',marginLeft:'8px'}}>↻ Reset & Rescan</button>
+          {p.rate_limited && <div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span>⚠ Rate limited — scan paused.</span>
+            <button className="btn btn-sm" onClick={resetAndRescan} style={{background:'var(--or)',border:'none',color:'#fff',marginLeft:'8px'}}>↻ Reset</button>
           </div>}
-        </div>
+        </div>;
       })()}
 
-      {/* Watchlist bar */}
       <div className="wl-bar">
         <span style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'.5px'}}>Watchlists:</span>
-        {wlNames.map(wn=><div key={wn}className={`wl-chip ${activeWL===wn?'a':''}`}onClick={()=>{setActiveWL(activeWL===wn?null:wn);setTab('all')}}>
+        {wlNames.map(function(wn){return <div key={wn} className={'wl-chip '+(activeWL===wn?'a':'')} onClick={function(){setActiveWL(activeWL===wn?null:wn);setTab('all')}}>
           {wn}<span className="idx-cnt">{(watchlists[wn]||[]).length}</span>
-          <span className="x"onClick={e=>{e.stopPropagation();if(confirm(`Delete "${wn}"?`))deleteWL(wn)}}>✕</span>
-        </div>)}
-        {addingWL?<form onSubmit={e=>{e.preventDefault();createWL(newWLName)}}style={{display:'flex',gap:'4px'}}><input ref={inputRef}className="wl-input"value={newWLName}onChange={e=>setNewWLName(e.target.value)}placeholder="Name..."onBlur={()=>setTimeout(()=>setAddingWL(false),200)}/><button type="submit"className="btn btn-sm btn-pu">Add</button></form>
-        :<button className="wl-add-btn"onClick={()=>setAddingWL(true)}>+ New</button>}
+          <span className="x" onClick={function(e){e.stopPropagation();if(confirm('Delete "'+wn+'"?'))deleteWL(wn)}}>✕</span>
+        </div>})}
+        {addingWL?<form onSubmit={function(e){e.preventDefault();createWL(newWLName)}} style={{display:'flex',gap:'4px'}}><input ref={inputRef} className="wl-input" value={newWLName} onChange={function(e){setNewWLName(e.target.value)}} placeholder="Name..." onBlur={function(){setTimeout(function(){setAddingWL(false)},200)}}/><button type="submit" className="btn btn-sm btn-pu">Add</button></form>
+        :<button className="wl-add-btn" onClick={function(){setAddingWL(true)}}>+ New</button>}
       </div>
 
-      {/* Signal tabs */}
       <div className="tabs">
-        <button className={`tab ${tab==='all'?'a':''}`}onClick={()=>setTab('all')}>All<span className="tc tcb">{filteredCounts.all}</span></button>
-        <button className={`tab ${tab==='setups'?'a':''}`}onClick={()=>setTab('setups')}style={tab==='setups'?{background:'rgba(16,185,129,.15)'}:{}}>🎯 Setups<span className="tc tcg">{filteredCounts.setups}</span></button>
-        <button className={`tab ${tab==='buy'?'a':''}`}onClick={()=>setTab('buy')}>Buy<span className="tc tcg">{filteredCounts.buy}</span></button>
-        <button className={`tab ${tab==='sell'?'a':''}`}onClick={()=>setTab('sell')}>Sell<span className="tc tcr">{filteredCounts.sell}</span></button>
-        <button className={`tab ${tab==='port'?'a':''}`}onClick={()=>setTab('port')}>Portfolio<span className="tc tcb">{filteredCounts.port}</span></button>
+        <button className={'tab '+(tab==='all'?'a':'')} onClick={function(){setTab('all')}}>All<span className="tc tcb">{filteredCounts.all}</span></button>
+        <button className={'tab '+(tab==='setups'?'a':'')} onClick={function(){setTab('setups')}} style={tab==='setups'?{background:'rgba(16,185,129,.15)'}:{}}>{'🎯 Setups'}<span className="tc tcg">{filteredCounts.setups}</span></button>
+        <button className={'tab '+(tab==='buy'?'a':'')} onClick={function(){setTab('buy')}}>Buy<span className="tc tcg">{filteredCounts.buy}</span></button>
+        <button className={'tab '+(tab==='sell'?'a':'')} onClick={function(){setTab('sell')}}>Sell<span className="tc tcr">{filteredCounts.sell}</span></button>
+        <button className={'tab '+(tab==='port'?'a':'')} onClick={function(){setTab('port')}}>Portfolio<span className="tc tcb">{filteredCounts.port}</span></button>
       </div>
 
-      <div className="srch"><input placeholder="Search any NSE stock..."value={search}onChange={e=>setSearch(e.target.value)}/></div>
+      <div className="srch"><input placeholder="Search stock..." value={search} onChange={function(e){setSearch(e.target.value)}}/></div>
+
+      {tab==='setups' && <div style={{background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'9px',padding:'12px 14px',marginBottom:'12px',boxShadow:'0 1px 3px rgba(0,0,0,.04)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+          <div style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',textTransform:'uppercase',letterSpacing:'.5px'}}>{'★ Golden Buy Filters'}</div>
+          <div style={{fontSize:'10px',fontFamily:"'JetBrains Mono'",color:'#b45309',fontWeight:700}}>{filteredCounts.golden+' matches'}</div>
+        </div>
+        <div style={{display:'flex',gap:'12px',flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div style={{flex:'1',minWidth:'120px'}}>
+            <div style={{fontSize:'9px',fontWeight:700,color:'var(--t2)',marginBottom:'3px'}}>{'MACD % of 1Y low ≥'}</div>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <input type="range" min="20" max="90" step="5" value={gbPctl} onChange={function(e){setGbPctl(Number(e.target.value))}} style={{flex:1,accentColor:'#b45309'}}/>
+              <span style={{fontSize:'13px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:'#b45309',minWidth:'35px',textAlign:'right'}}>{gbPctl+'%'}</span>
+            </div>
+          </div>
+          <div style={{flex:'1.5',minWidth:'180px'}}>
+            <div style={{fontSize:'9px',fontWeight:700,color:'var(--t2)',marginBottom:'3px'}}>{'d(MACD)/dt range'}</div>
+            <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+              <span style={{fontSize:'10px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:'#b45309',minWidth:'40px'}}>{gbSlopeMin.toFixed(2)}</span>
+              <input type="range" min="-2" max="0" step="0.05" value={gbSlopeMin} onChange={function(e){setGbSlopeMin(Number(e.target.value))}} style={{flex:1,accentColor:'#b45309'}}/>
+              <span style={{fontSize:'9px',color:'var(--t3)',margin:'0 2px'}}>to</span>
+              <input type="range" min="0" max="2" step="0.05" value={gbSlopeMax} onChange={function(e){setGbSlopeMax(Number(e.target.value))}} style={{flex:1,accentColor:'#b45309'}}/>
+              <span style={{fontSize:'10px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:'#b45309',minWidth:'40px',textAlign:'right'}}>{gbSlopeMax.toFixed(2)}</span>
+            </div>
+          </div>
+          <div style={{flex:'1',minWidth:'120px'}}>
+            <div style={{fontSize:'9px',fontWeight:700,color:'var(--t2)',marginBottom:'3px'}}>{'d(SMA200)/dt >'}</div>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <input type="range" min="0" max="2" step="0.05" value={gbSmaSlope} onChange={function(e){setGbSmaSlope(Number(e.target.value))}} style={{flex:1,accentColor:'#b45309'}}/>
+              <span style={{fontSize:'13px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:'#b45309',minWidth:'35px',textAlign:'right'}}>{gbSmaSlope.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </div>}
 
       <div className="tc2">
-        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{activeWL?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{activeWL?`"${activeWL}" is empty. Click a stock → add to watchlist.`:search?`No match for "${search}"`:'No stocks yet. Run a scan.'}</div></div>
+        {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{activeWL?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{activeWL?'"'+activeWL+'" is empty.':search?'No match for "'+search+'"':isSc?'Stocks loading...':'No stocks yet.'}</div></div>
         :<div className="ts"><table>
           <thead><tr>
-            <th onClick={()=>doSort('symbol')}>Stock</th>
-            <th onClick={()=>doSort('price')}>Price</th>
-            <th onClick={()=>doSort('buy_score')}>Buy</th>
-            <th onClick={()=>doSort('sell_pct')}>Sell</th>
-            <th onClick={()=>doSort('macd_slope')}>MACD ↕</th>
-            <th onClick={()=>doSort('price_accel')}>Price ↕</th>
-            <th onClick={()=>doSort('rr_ratio')}>R:R</th>
+            <th onClick={function(){doSort('symbol')}}>Stock</th>
+            <th onClick={function(){doSort('price')}}>Price</th>
+            <th onClick={function(){doSort('buy_score')}}>Buy</th>
+            <th onClick={function(){doSort('sell_pct')}}>Sell</th>
+            <th onClick={function(){doSort('macd_slope')}}>MACD</th>
+            <th onClick={function(){doSort('price_accel')}}>Price</th>
+            <th onClick={function(){doSort('rr_ratio')}}>R:R</th>
             <th>Signal</th>
           </tr></thead>
-          <tbody>{stocks.map(s=><tr key={s.symbol}onClick={()=>setSel(s)}style={{cursor:'pointer'}}>
-            <td><div className="sn"><span className="sns">{s.name}</span>{s.in_portfolio&&<span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span></div></td>
-            <td style={{fontWeight:600}}>₹{fmt(s.price)}</td>
-            <td><span className={`score score-buy ${s.buy_score>=75?'strong':''}`}>{s.buy_score}</span></td>
+          <tbody>{stocks.map(function(s){return <tr key={s.symbol} onClick={function(){setSel(s)}} style={{cursor:'pointer'}}>
+            <td><div className="sn"><span className="sns">{s.name}</span>{goldenMatch(s) && <span style={{display:'inline-block',padding:'1px 5px',borderRadius:'3px',fontSize:'8px',fontWeight:700,background:'rgba(217,119,6,.12)',color:'#b45309',marginLeft:'4px'}}>{'★ GOLDEN'}</span>}{s.in_portfolio && <span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span></div></td>
+            <td style={{fontWeight:600}}>{'₹'+fmt(s.price)}</td>
+            <td><span className={'score score-buy '+(s.buy_score>=75?'strong':'')}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
             <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve} zeroY={s.macd_zero_y}/></td>
             <td><PriceAccel vel={s.price_vel} accel={s.price_accel} upDays={s.up_days}/></td>
             <td><RR ratio={s.rr_ratio}/></td>
-            <td>{s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
-          </tr>)}</tbody>
+            <td>{goldenMatch(s)?<span className="sig" style={{background:'rgba(217,119,6,.12)',color:'#b45309',border:'1px solid rgba(217,119,6,.3)',fontWeight:800}}>{'★ GOLDEN'}</span>:s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
+          </tr>})}</tbody>
         </table></div>}
       </div>
     </main>
-    {sel&&<Modal s={sel}onClose={()=>setSel(null)}watchlists={watchlists}onAddToWL={toggleInWL}/>}
-  </>
+    {sel && <Modal s={sel} onClose={function(){setSel(null)}} watchlists={watchlists} onAddToWL={toggleInWL} isGolden={goldenMatch(sel)}/>}
+  </div>;
 }
 
-class ErrorBoundary extends React.Component{
-  constructor(p){super(p);this.state={err:null}}
-  static getDerivedStateFromError(e){return{err:e}}
-  render(){if(this.state.err)return React.createElement('div',{style:{padding:'40px',color:'#ef4444',fontFamily:'monospace',fontSize:'13px',background:'#0a0e17',minHeight:'100vh'}},
-    React.createElement('h2',null,'⚠ UI Error'),
-    React.createElement('pre',{style:{whiteSpace:'pre-wrap',marginTop:'10px'}},this.state.err.toString()),
-    React.createElement('button',{onClick:()=>window.location.reload(),style:{marginTop:'16px',padding:'8px 16px',background:'#10b981',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer'}},'Reload')
-  );return this.props.children}
+// Error boundary
+class EB extends React.Component{
+  constructor(p){super(p);this.state={e:null}}
+  static getDerivedStateFromError(e){return{e:e}}
+  render(){
+    if(this.state.e)return React.createElement('div',{style:{padding:'40px',color:'#dc2626',fontFamily:'monospace',fontSize:'13px',background:'#f8fafc',minHeight:'100vh'}},
+      React.createElement('h2',null,'UI Error'),
+      React.createElement('pre',{style:{whiteSpace:'pre-wrap',marginTop:'10px'}},String(this.state.e)),
+      React.createElement('button',{onClick:function(){window.location.reload()},style:{marginTop:'16px',padding:'8px 16px',background:'#10b981',color:'#fff',border:'none',borderRadius:'6px',cursor:'pointer'}},'Reload')
+    );
+    return this.props.children;
+  }
 }
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary,null,React.createElement(App)));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(EB,null,React.createElement(App)));
 </script>
 </body>
 </html>

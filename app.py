@@ -144,11 +144,11 @@ def fetch_instrument_list():
 RATE_LIMITED = "RATE_LIMITED"  # sentinel value
 
 def fetch_candle_data(symbol_token):
-    """Fetch 365 days of daily candles. Returns DataFrame, None (no data), or RATE_LIMITED."""
+    """Fetch 730 days of daily candles for proper EMA warmup. Returns DataFrame, None (no data), or RATE_LIMITED."""
     if not ensure_session(): return RATE_LIMITED
     try:
         to_d = datetime.now()
-        from_d = to_d - timedelta(days=365)
+        from_d = to_d - timedelta(days=730)
         resp = smart_api.getCandleData({
             "exchange": "NSE", "symboltoken": str(symbol_token),
             "interval": "ONE_DAY",
@@ -256,6 +256,8 @@ def analyze_stock(df):
 
     # SMA(200) — only calculate if we have enough data
     s200 = calc_sma(close,200).iloc[-1] if n_candles >= 200 else np.nan
+    s200_prev = calc_sma(close,200).iloc[-2] if n_candles >= 201 else np.nan
+    sma200_slope = float(s200 - s200_prev) if ok(s200) and ok(s200_prev) else 0
 
     r14 = calc_rsi(close,14).iloc[-1]
     bm,bu,bl = calc_bb(close,20,2)
@@ -341,13 +343,46 @@ def analyze_stock(df):
     buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": 25,
                                 "val": sf(s200), "desc": sma_desc}
 
-    # 2. MACD INFLECTION — 30 pts (★ highest weight)
-    #    Best case: MACD just crossed zero up (0 < MACD < 0.15) AND d²/dt² > 0
+    # 2. MACD INFLECTION — 30 pts (★ highest weight) + 10 bonus for GOLDEN BUY
+    #    GOLDEN BUY: MACD in bottom 20% of 1-year range + slope flat + SMA200 rising
+    #    This normalizes MACD across stocks of different price/volume scales
+    #    Best case: MACD just crossed zero up + accel > 0
     #    Good case: slope just flipped positive
     #    Early case: decline decelerating (d²/dt² > 0 while d/dt < 0)
+
+    # Calculate MACD position relative to 1-year lowest low
+    # Skip first 60 values (EMA warmup) and use last 250 trading days (~1 year)
+    macd_vals = ml.dropna()
+    macd_1y_low = 0
+    macd_low_pct = 0
+    macd_pctl = 50
+    if len(macd_vals) >= 60:
+        # Skip warmup, take last 250 trading days for the 1Y range
+        stable_vals = macd_vals.iloc[60:]  # skip warmup
+        recent_vals = stable_vals.iloc[-650:] if len(stable_vals) > 650 else stable_vals
+        macd_1y_low = float(recent_vals.min())
+        macd_1y_high = float(recent_vals.max())
+        macd_range = macd_1y_high - macd_1y_low if macd_1y_high != macd_1y_low else 1
+        # How close is current MACD to the yearly low? (as % of |low|)
+        if macd_1y_low < 0:
+            macd_low_pct = round(float(cm) / macd_1y_low * 100, 1)
+            macd_low_pct = max(0, min(100, macd_low_pct))
+        else:
+            macd_low_pct = 0
+        macd_pctl = round((float(cm) - macd_1y_low) / macd_range * 100, 1)
+    else:
+        macd_low_pct = 0
+        macd_pctl = 50
+
+    # Golden Buy: MACD has dipped to >= X% of its yearly lowest low
+    # e.g. yearly low = -100, threshold = 60%, triggers when MACD < -60
+    golden_buy = bool(macd_low_pct >= 60 and macd_slope <= 0.2 and sma200_slope > 0.1)
     macd_inf_pts = 0
     macd_inf_desc = ""
-    if macd_zero_cross_up and macd_accel > 0:
+    if golden_buy:
+        macd_inf_pts = 30
+        macd_inf_desc = f"★ GOLDEN BUY — MACD at {macd_low_pct:.0f}% of 1Y low ({macd_1y_low:.1f}) + flat + SMA200↑"
+    elif macd_zero_cross_up and macd_accel > 0:
         macd_inf_pts = 30
         macd_inf_desc = "MACD crossed 0↑ + accel ↑ (PRIME ENTRY)"
     elif slope_cross_up:
@@ -357,8 +392,10 @@ def analyze_stock(df):
         macd_inf_pts = 10
         macd_inf_desc = "Decline slowing (d²>0, d<0)"
     macd_inf_pass = macd_inf_pts > 0
-    buy_score += macd_inf_pts
-    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts, "max": 30,
+    # Golden buy gets a 10-point bonus on top
+    golden_bonus = 10 if golden_buy else 0
+    buy_score += macd_inf_pts + golden_bonus
+    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts + golden_bonus, "max": 40,
                                          "val": sf(macd_slope, 4), "desc": macd_inf_desc or "No inflection detected"}
 
     # 3. RSI(14) — 15 pts + 5 bonus
@@ -421,10 +458,10 @@ def analyze_stock(df):
             break
 
     return {
-        "price":sf(price),"sma200":sf(s200),"rsi":sf(r14),
+        "price":sf(price),"sma200":sf(s200),"sma200_slope":round(sma200_slope,3),"rsi":sf(r14),
         "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
         "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
-        "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),
+        "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),"macd_pctl":macd_pctl,"macd_low_pct":macd_low_pct,"macd_1y_low":round(macd_1y_low,2),
         "macd_phase":macd_phase,"macd_curve":macd_curve,"macd_zero_y":macd_zero_y,
         "obv":sf(co,0),"adx":sf(curr_adx),
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
@@ -433,6 +470,7 @@ def analyze_stock(df):
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
         "sell_conditions":sell_c,"sell_count":f"{sell_count}/6","sell_pct":sell_count/6*100,
         "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,"is_sell":sell_count>=3,
+        "golden_buy":golden_buy,
     }
 
 # ═══════════════════════════════════════════════════════════════
