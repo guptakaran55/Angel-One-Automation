@@ -407,23 +407,37 @@ def analyze_stock(df):
     reward = round(resistance-price,2) if resistance else 0
     rr_ratio = round(reward/risk,2) if risk>0 else 0
 
+    # ── ATR & Position Sizing ──
+    atr_raw = (high - low).ewm(span=14, adjust=False).mean()
+    atr = float(atr_raw.iloc[-1]) if len(atr_raw) > 0 and ok(atr_raw.iloc[-1]) else 0
+    risk_in_atrs = round(risk / atr, 2) if atr > 0 and risk > 0 else 0
+    # Fixed risk model: assume ₹10,000 risk per trade (user can mentally scale)
+    RISK_PER_TRADE = 10000
+    position_size = int(RISK_PER_TRADE / risk) if risk > 0 else 0
+    capital_needed = round(position_size * price, 0) if position_size > 0 else 0
+    potential_profit = round(position_size * reward, 0) if position_size > 0 else 0
+    roc_pct = round(potential_profit / capital_needed * 100, 2) if capital_needed > 0 else 0
+
     # MACD zero-cross detection: MACD just turned positive from ≤0
     cm_prev_val = ml.iloc[-2] if len(ml) >= 2 else 0
     macd_zero_cross_up = bool(ok(cm) and cm > 0 and cm < 0.15 and ok(cm_prev_val) and cm_prev_val <= 0)
 
     # Mini MACD curve (last 20 values, normalised for sparkline)
+    # CRITICAL: always include 0 in the normalization range so the zero line
+    # sits at its true relative position (like a real MACD chart)
     macd_curve = []
     macd_zero_y = 0.5  # default: middle
     n_curve = min(20, len(ml))
     if n_curve > 2:
         raw = [float(ml.iloc[-n_curve + j]) for j in range(n_curve) if ok(ml.iloc[-n_curve + j])]
         if raw:
-            mn, mx = min(raw), max(raw)
+            # Include 0 in the min/max range so zero line is always correctly placed
+            mn = min(min(raw), 0)
+            mx = max(max(raw), 0)
             rng = mx - mn if mx != mn else 1
             macd_curve = [round((v - mn) / rng, 3) for v in raw]
-            # Where does MACD=0 sit in the normalized 0-1 range?
+            # Zero line position is now always correct within the range
             macd_zero_y = round((0 - mn) / rng, 3)
-            macd_zero_y = max(0, min(1, macd_zero_y))  # clamp to 0-1
 
     # ══════════════════════════════════════════════════════════
     # BUY SCORE — Revised Weights (max ~110 with all bonuses)
@@ -579,6 +593,8 @@ def analyze_stock(df):
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
         "price_accel":round(price_accel,3),"up_days":up_days,
         "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
+        "atr":round(atr,2),"risk_in_atrs":risk_in_atrs,"position_size":position_size,
+        "capital_needed":capital_needed,"potential_profit":potential_profit,"roc_pct":roc_pct,
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
         "sell_conditions":sell_c,"sell_count":f"{sell_count}/6","sell_pct":sell_count/6*100,
         "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,"is_sell":sell_count>=3,
