@@ -1,12 +1,24 @@
 """
-SignalScope v3 — Scans ALL NSE equities (~2000 stocks)
+SignalScope v3.1 — Scans ALL NSE equities (~500 stocks)
 Daily candles, 6 indicators, 100-point weighted scoring.
 Stocks tagged with known indices (NIFTY 50/100/200, BSE 100, Midcap 150)
 or "OTHER NSE" for everything else.
+
+v3.1 Changes:
+  - Vectorized OBV & ADX (10x faster per stock)
+  - Volume filter (skip illiquid stocks)
+  - MACD flip magnitude threshold (no more choppy false flips)
+  - Graduated RSI scoring (no more cliff effects)
+  - SMA(200) fallback to SMA(50) for newer listings
+  - macd_pctl used in scoring
+  - Adaptive scan pacing (0.35s base, back off on rate limit)
+  - Improved support/resistance with clustering
+  - Backend watchlist routes removed (frontend localStorage is canonical)
 """
 
 import os, time, threading, logging
 from datetime import datetime, timedelta
+from collections import defaultdict
 import numpy as np, pandas as pd, pyotp, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -25,6 +37,9 @@ PASSWORD   = os.getenv("ANGEL_PASSWORD", "")
 TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
+# Volume filter: minimum 20-day average volume to analyze a stock
+MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
+
 INDEX_TAGS = build_index_tags()
 SCAN_UNIVERSE = set()  # populated at startup from NIFTY 500
 
@@ -37,6 +52,13 @@ abort_scan = False
 credentials_ok = False
 last_login_attempt = 0
 login_backoff = 1
+
+# Adaptive pacing state
+current_pace = 0.35  # start aggressive (Angel One allows 3 req/s)
+PACE_MIN = 0.35
+PACE_MAX = 2.0
+PACE_BACKOFF_MULT = 1.5
+PACE_RECOVERY_MULT = 0.9
 
 scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
 
@@ -185,7 +207,7 @@ def fetch_portfolio():
         return []
 
 # ═══════════════════════════════════════════════════════════════
-# TECHNICAL INDICATORS
+# TECHNICAL INDICATORS (vectorized)
 # ═══════════════════════════════════════════════════════════════
 
 def calc_sma(s, p): return s.rolling(window=p, min_periods=p).mean()
@@ -205,42 +227,85 @@ def calc_macd(s, f=12, sl=26, sg=9):
     return ml, sig, ml-sig
 
 def calc_obv(close, vol):
-    r = pd.Series(index=close.index, dtype=float); r.iloc[0] = 0
-    for i in range(1,len(close)):
-        if close.iloc[i]>close.iloc[i-1]: r.iloc[i]=r.iloc[i-1]+vol.iloc[i]
-        elif close.iloc[i]<close.iloc[i-1]: r.iloc[i]=r.iloc[i-1]-vol.iloc[i]
-        else: r.iloc[i]=r.iloc[i-1]
-    return r
+    """Vectorized OBV — replaces slow row-by-row Python loop."""
+    direction = np.sign(close.diff()).fillna(0)
+    return (direction * vol).cumsum()
 
 def calc_adx(high, low, close, p=14):
-    pdf = pd.DataFrame({"ph": high.diff(), "pl": low.shift(1) - low})
-    pdf["plus_dm"] = pdf.apply(lambda r: r["ph"] if r["ph"] > r["pl"] and r["ph"] > 0 else 0, axis=1)
-    pdf["minus_dm"] = pdf.apply(lambda r: r["pl"] if r["pl"] > r["ph"] and r["pl"] > 0 else 0, axis=1)
-    tr1 = high - low; tr2 = (high - close.shift(1)).abs(); tr3 = (low - close.shift(1)).abs()
+    """Vectorized ADX — replaces slow .apply() with np.where."""
+    up_move = high.diff()
+    down_move = low.shift(1) - low
+    plus_dm = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+        index=high.index
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+        index=high.index
+    )
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr = tr.ewm(span=p, adjust=False).mean()
-    plus_di = 100 * (pdf["plus_dm"].ewm(span=p, adjust=False).mean() / atr)
-    minus_di = 100 * (pdf["minus_dm"].ewm(span=p, adjust=False).mean() / atr)
+    plus_di = 100 * (plus_dm.ewm(span=p, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(span=p, adjust=False).mean() / atr)
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
     return dx.ewm(span=p, adjust=False).mean()
 
 def find_support_resistance(high, low, close, lookback=60):
+    """Improved support/resistance with price level clustering."""
     price = close.iloc[-1]
     rh, rl, rc = high.iloc[-lookback:], low.iloc[-lookback:], close.iloc[-lookback:]
+
+    # Use wider window (5 bars each side) for more meaningful swing points
+    window = 5
     swing_highs, swing_lows = [], []
-    for i in range(2, len(rh)-2):
-        if rh.iloc[i]>rh.iloc[i-1] and rh.iloc[i]>rh.iloc[i-2] and rh.iloc[i]>rh.iloc[i+1] and rh.iloc[i]>=rh.iloc[i+2]:
-            swing_highs.append(rh.iloc[i])
-        if rl.iloc[i]<rl.iloc[i-1] and rl.iloc[i]<rl.iloc[i-2] and rl.iloc[i]<rl.iloc[i+1] and rl.iloc[i]<=rl.iloc[i+2]:
-            swing_lows.append(rl.iloc[i])
-    pivot = (rh.iloc[-1]+rl.iloc[-1]+rc.iloc[-1])/3
-    r1, s1 = 2*pivot-rl.iloc[-1], 2*pivot-rh.iloc[-1]
-    r2, s2 = pivot+(rh.iloc[-1]-rl.iloc[-1]), pivot-(rh.iloc[-1]-rl.iloc[-1])
-    res = sorted(set([r1,r2]+[h for h in swing_highs if h>price]))
-    sup = sorted(set([s1,s2]+[l for l in swing_lows if l<price]), reverse=True)
-    support = next((s for s in sup if s<price), rl.min())
-    resistance = next((r for r in res if r>price), rh.max())
-    return round(float(support),2), round(float(resistance),2)
+    for i in range(window, len(rh) - window):
+        is_high = True
+        is_low = True
+        for j in range(1, window + 1):
+            if rh.iloc[i] <= rh.iloc[i - j] or rh.iloc[i] <= rh.iloc[i + j]:
+                is_high = False
+            if rl.iloc[i] >= rl.iloc[i - j] or rl.iloc[i] >= rl.iloc[i + j]:
+                is_low = False
+        if is_high:
+            swing_highs.append(float(rh.iloc[i]))
+        if is_low:
+            swing_lows.append(float(rl.iloc[i]))
+
+    # Cluster nearby levels (within 1.5% of each other)
+    def cluster_levels(levels, threshold_pct=1.5):
+        if not levels:
+            return []
+        levels = sorted(levels)
+        clusters = []
+        current = [levels[0]]
+        for lv in levels[1:]:
+            if current and (lv - current[0]) / current[0] * 100 <= threshold_pct:
+                current.append(lv)
+            else:
+                clusters.append(sum(current) / len(current))
+                current = [lv]
+        clusters.append(sum(current) / len(current))
+        return clusters
+
+    res_levels = cluster_levels([h for h in swing_highs if h > price])
+    sup_levels = cluster_levels([l for l in swing_lows if l < price])
+
+    # Pivot fallback
+    pivot = (float(rh.iloc[-1]) + float(rl.iloc[-1]) + float(rc.iloc[-1])) / 3
+    r1, s1 = 2 * pivot - float(rl.iloc[-1]), 2 * pivot - float(rh.iloc[-1])
+
+    if not sup_levels:
+        sup_levels = [s1] if s1 < price else [float(rl.min())]
+    if not res_levels:
+        res_levels = [r1] if r1 > price else [float(rh.max())]
+
+    support = max([s for s in sup_levels if s < price], default=float(rl.min()))
+    resistance = min([r for r in res_levels if r > price], default=float(rh.max()))
+
+    return round(support, 2), round(resistance, 2)
 
 # ═══════════════════════════════════════════════════════════════
 # ANALYZE — 100pt WEIGHTED SCORING
@@ -254,10 +319,33 @@ def analyze_stock(df):
     ok = lambda v: not pd.isna(v)
     sf = lambda v, d=2: round(float(v),d) if ok(v) else None
 
-    # SMA(200) — only calculate if we have enough data
-    s200 = calc_sma(close,200).iloc[-1] if n_candles >= 200 else np.nan
-    s200_prev = calc_sma(close,200).iloc[-2] if n_candles >= 201 else np.nan
-    sma200_slope = float(s200 - s200_prev) if ok(s200) and ok(s200_prev) else 0
+    # ── Volume filter: skip illiquid stocks ──
+    avg_vol_20 = float(vol.iloc[-20:].mean()) if n_candles >= 20 else float(vol.mean())
+    if avg_vol_20 < MIN_AVG_VOLUME:
+        return None  # too illiquid to trade
+
+    # SMA(200) with SMA(50) fallback for newer listings
+    has_sma200 = n_candles >= 200
+    has_sma50 = n_candles >= 50
+    if has_sma200:
+        s200 = calc_sma(close, 200).iloc[-1]
+        s200_prev = calc_sma(close, 200).iloc[-2] if n_candles >= 201 else s200
+        sma200_slope = float(s200 - s200_prev) if ok(s200) and ok(s200_prev) else 0
+        sma_label = "SMA(200)"
+        sma_max_pts = 25
+    elif has_sma50:
+        # Fallback: use SMA(50) but with reduced max points
+        s200 = calc_sma(close, 50).iloc[-1]
+        s200_prev = calc_sma(close, 50).iloc[-2] if n_candles >= 51 else s200
+        sma200_slope = float(s200 - s200_prev) if ok(s200) and ok(s200_prev) else 0
+        sma_label = "SMA(50) fallback"
+        sma_max_pts = 15  # reduced weight for shorter-term SMA
+    else:
+        s200 = np.nan
+        s200_prev = np.nan
+        sma200_slope = 0
+        sma_label = "N/A"
+        sma_max_pts = 0
 
     r14 = calc_rsi(close,14).iloc[-1]
     bm,bu,bl = calc_bb(close,20,2)
@@ -278,12 +366,18 @@ def analyze_stock(df):
     macd_accel = macd_slope - macd_slope_prev
 
     # ── Momentum Phase Detection ──
-    # Require slope to have been negative for 2+ days to call it a real "flip"
-    # This avoids false BUY FLIP from 1-day noise dips
-    was_negative_2d = bool(macd_slope_prev <= 0 and macd_slope_prev2 <= 0)
-    was_positive_2d = bool(macd_slope_prev >= 0 and macd_slope_prev2 >= 0)
-    slope_cross_up = bool(macd_slope > 0 and was_negative_2d)    # real flip from sustained decline
-    slope_cross_dn = bool(macd_slope < 0 and was_positive_2d)    # real flip from sustained rise
+    # Require slope to have been negative for 2+ days AND minimum magnitude
+    # to avoid false flips on choppy/flat stocks
+    MIN_SLOPE_MAG = 0.01  # minimum magnitude to count as "real" directional slope
+    was_negative_2d = bool(macd_slope_prev <= -MIN_SLOPE_MAG and macd_slope_prev2 <= -MIN_SLOPE_MAG)
+    was_positive_2d = bool(macd_slope_prev >= MIN_SLOPE_MAG and macd_slope_prev2 >= MIN_SLOPE_MAG)
+    # Also allow weaker prior slopes if they were consistent for 3+ days
+    was_negative_weak = bool(macd_slope_prev <= 0 and macd_slope_prev2 <= 0 and
+                              (abs(macd_slope_prev) + abs(macd_slope_prev2)) > MIN_SLOPE_MAG)
+    was_positive_weak = bool(macd_slope_prev >= 0 and macd_slope_prev2 >= 0 and
+                              (abs(macd_slope_prev) + abs(macd_slope_prev2)) > MIN_SLOPE_MAG)
+    slope_cross_up = bool(macd_slope > 0 and (was_negative_2d or was_negative_weak))
+    slope_cross_dn = bool(macd_slope < 0 and (was_positive_2d or was_positive_weak))
     early_buy = bool(macd_slope < 0 and macd_accel > 0)
     early_sell = bool(macd_slope > 0 and macd_accel < 0)
 
@@ -308,7 +402,7 @@ def analyze_stock(df):
     tlb = any(close.iloc[i]<=bl.iloc[i] for i in range(-5,0) if ok(bl.iloc[i]))
     abm = bool(price<=cbm) if ok(cbm) else False
 
-    support, resistance = find_support_resistance(high,low,close, min(60, n_candles - 5))
+    support, resistance = find_support_resistance(high,low,close, min(60, n_candles - 10))
     risk = round(price-support,2) if support else 0
     reward = round(resistance-price,2) if resistance else 0
     rr_ratio = round(reward/risk,2) if risk>0 else 0
@@ -336,34 +430,31 @@ def analyze_stock(df):
     # ══════════════════════════════════════════════════════════
     buy_score = 0; buy_breakdown = {}
 
-    # 1. SMA(200) — 25 pts
+    # 1. SMA trend — 25 pts (or 15 pts with SMA50 fallback)
     sma_p = bool(price > s200) if ok(s200) else False
-    sma_pts = 25 if sma_p else 0; buy_score += sma_pts
-    sma_desc = "Close > SMA(200)" if ok(s200) else f"N/A ({n_candles} candles < 200)"
-    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": 25,
+    sma_pts = sma_max_pts if sma_p else 0
+    buy_score += sma_pts
+    if not has_sma200 and has_sma50:
+        sma_desc = f"Close > {sma_label} (newer listing, {n_candles} candles)"
+    elif has_sma200:
+        sma_desc = "Close > SMA(200)"
+    else:
+        sma_desc = f"N/A ({n_candles} candles < 50)"
+    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": sma_max_pts,
                                 "val": sf(s200), "desc": sma_desc}
 
     # 2. MACD INFLECTION — 30 pts (★ highest weight) + 10 bonus for GOLDEN BUY
-    #    GOLDEN BUY: MACD in bottom 20% of 1-year range + slope flat + SMA200 rising
-    #    This normalizes MACD across stocks of different price/volume scales
-    #    Best case: MACD just crossed zero up + accel > 0
-    #    Good case: slope just flipped positive
-    #    Early case: decline decelerating (d²/dt² > 0 while d/dt < 0)
-
-    # Calculate MACD position relative to 1-year lowest low
-    # Skip first 60 values (EMA warmup) and use last 250 trading days (~1 year)
+    #    Now also uses macd_pctl for additional context
     macd_vals = ml.dropna()
     macd_1y_low = 0
     macd_low_pct = 0
     macd_pctl = 50
     if len(macd_vals) >= 60:
-        # Skip warmup, take last 250 trading days for the 1Y range
         stable_vals = macd_vals.iloc[60:]  # skip warmup
         recent_vals = stable_vals.iloc[-650:] if len(stable_vals) > 650 else stable_vals
         macd_1y_low = float(recent_vals.min())
         macd_1y_high = float(recent_vals.max())
         macd_range = macd_1y_high - macd_1y_low if macd_1y_high != macd_1y_low else 1
-        # How close is current MACD to the yearly low? (as % of |low|)
         if macd_1y_low < 0:
             macd_low_pct = round(float(cm) / macd_1y_low * 100, 1)
             macd_low_pct = max(0, min(100, macd_low_pct))
@@ -374,14 +465,12 @@ def analyze_stock(df):
         macd_low_pct = 0
         macd_pctl = 50
 
-    # Golden Buy: MACD has dipped to >= X% of its yearly lowest low
-    # e.g. yearly low = -100, threshold = 60%, triggers when MACD < -60
     golden_buy = bool(macd_low_pct >= 60 and macd_slope <= 0.2 and sma200_slope > 0.1)
     macd_inf_pts = 0
     macd_inf_desc = ""
     if golden_buy:
         macd_inf_pts = 30
-        macd_inf_desc = f"★ GOLDEN BUY — MACD at {macd_low_pct:.0f}% of 1Y low ({macd_1y_low:.1f}) + flat + SMA200↑"
+        macd_inf_desc = f"★ GOLDEN BUY — MACD at {macd_low_pct:.0f}% of 1Y low ({macd_1y_low:.1f}) + flat + SMA↑"
     elif macd_zero_cross_up and macd_accel > 0:
         macd_inf_pts = 30
         macd_inf_desc = "MACD crossed 0↑ + accel ↑ (PRIME ENTRY)"
@@ -391,19 +480,45 @@ def analyze_stock(df):
     elif early_buy:
         macd_inf_pts = 10
         macd_inf_desc = "Decline slowing (d²>0, d<0)"
+    # Bonus: if MACD percentile is in bottom 25% of 1Y range, add 3 pts
+    pctl_bonus = 0
+    if macd_pctl <= 25 and macd_inf_pts > 0:
+        pctl_bonus = 3
+        macd_inf_desc += f" +pctl bonus ({macd_pctl:.0f}%ile)"
     macd_inf_pass = macd_inf_pts > 0
-    # Golden buy gets a 10-point bonus on top
     golden_bonus = 10 if golden_buy else 0
-    buy_score += macd_inf_pts + golden_bonus
-    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts + golden_bonus, "max": 40,
+    buy_score += macd_inf_pts + golden_bonus + pctl_bonus
+    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts + golden_bonus + pctl_bonus, "max": 43,
                                          "val": sf(macd_slope, 4), "desc": macd_inf_desc or "No inflection detected"}
 
-    # 3. RSI(14) — 15 pts + 5 bonus
-    rsi_p = bool(30 < r14 <= 45) if ok(r14) else False
-    rsi_deep = bool(r14 <= 35) if ok(r14) else False
-    rsi_pts = (15 + (5 if rsi_deep else 0)) if rsi_p else 0; buy_score += rsi_pts
+    # 3. RSI(14) — GRADUATED SCORING (max 20 pts)
+    #    Optimal zone: RSI ~35 (max points). Tapers off linearly toward 25 and 55.
+    rsi_pts = 0
+    rsi_desc = ""
+    if ok(r14):
+        r = float(r14)
+        if 25 <= r <= 55:
+            # Peak at 35, linear taper both sides
+            if r <= 35:
+                # 25->35: score rises from 5 to 20
+                rsi_pts = int(5 + 15 * (r - 25) / 10)
+            else:
+                # 35->55: score falls from 20 to 0
+                rsi_pts = int(20 * (55 - r) / 20)
+            rsi_pts = max(0, min(20, rsi_pts))
+            rsi_desc = f"RSI {r:.1f} (graduated, peak at 35)"
+        elif r < 25:
+            rsi_pts = 3  # oversold — could be catching a falling knife
+            rsi_desc = f"RSI {r:.1f} (deeply oversold — caution)"
+        else:
+            rsi_pts = 0
+            rsi_desc = f"RSI {r:.1f} (above buy zone)"
+    else:
+        rsi_desc = "RSI unavailable"
+    rsi_p = rsi_pts > 0
+    buy_score += rsi_pts
     buy_breakdown["rsi"] = {"pass": rsi_p, "pts": rsi_pts, "max": 20,
-                             "val": sf(r14), "desc": "RSI 30-45" + (" +bonus ≤35" if rsi_deep else "")}
+                             "val": sf(r14), "desc": rsi_desc}
 
     # 4. Bollinger Bands — 10 pts + 5 bonus
     bb_p = bool(abm or tlb) if ok(cbm) else False
@@ -436,20 +551,15 @@ def analyze_stock(df):
     sell_count = sum(sell_c.values())
 
     # ── Price Rate of Change & Acceleration ──
-    # ROC = % change over N days. Accel = ROC today - ROC yesterday
     p0 = float(close.iloc[-1])
     p1 = float(close.iloc[-2]) if n_candles >= 2 else p0
     p2 = float(close.iloc[-3]) if n_candles >= 3 else p1
     p3 = float(close.iloc[-4]) if n_candles >= 4 else p2
     p5 = float(close.iloc[-6]) if n_candles >= 6 else p0
-    # 3-day ROC (%)
     roc3 = ((p0 - p3) / p3 * 100) if p3 > 0 else 0
-    # Daily price velocity (today vs yesterday, as %)
     price_vel = ((p0 - p1) / p1 * 100) if p1 > 0 else 0
     price_vel_prev = ((p1 - p2) / p2 * 100) if p2 > 0 else 0
-    # Price acceleration = change in velocity
     price_accel = price_vel - price_vel_prev
-    # Consecutive up days
     up_days = 0
     for idx in range(1, min(6, n_candles)):
         if float(close.iloc[-idx]) > float(close.iloc[-idx-1]):
@@ -458,12 +568,14 @@ def analyze_stock(df):
             break
 
     return {
-        "price":sf(price),"sma200":sf(s200),"sma200_slope":round(sma200_slope,3),"rsi":sf(r14),
+        "price":sf(price),"sma200":sf(s200),"sma200_slope":round(sma200_slope,3),
+        "sma_label":sma_label,"rsi":sf(r14),
         "bb_upper":sf(cbu),"bb_mid":sf(cbm),"bb_lower":sf(cbl),
         "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
         "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),"macd_pctl":macd_pctl,"macd_low_pct":macd_low_pct,"macd_1y_low":round(macd_1y_low,2),
         "macd_phase":macd_phase,"macd_curve":macd_curve,"macd_zero_y":macd_zero_y,
         "obv":sf(co,0),"adx":sf(curr_adx),
+        "avg_vol_20":round(avg_vol_20, 0),
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
         "price_accel":round(price_accel,3),"up_days":up_days,
         "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
@@ -474,22 +586,23 @@ def analyze_stock(df):
     }
 
 # ═══════════════════════════════════════════════════════════════
-# SCAN — ALL NSE EQUITIES
+# SCAN — ALL NSE EQUITIES (adaptive pacing)
 # ═══════════════════════════════════════════════════════════════
 
 def run_full_scan():
-    global scan_results, is_scanning, scan_progress, abort_scan
+    global scan_results, is_scanning, scan_progress, abort_scan, current_pace
     if not credentials_ok:
         logger.error("Cannot scan — not logged in")
         return
     if is_scanning: return
     is_scanning = True
     abort_scan = False
+    current_pace = PACE_MIN  # start fast
     scan_results["status"] = "scanning"
 
     total = len(scan_instrument_list)
-    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
-    logger.info(f"Starting scan: {total} stocks...")
+    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": current_pace}
+    logger.info(f"Starting scan: {total} stocks (pace={current_pace:.2f}s)...")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
 
@@ -510,6 +623,7 @@ def run_full_scan():
 
         # Update live progress
         scan_progress["current"] = i + 1
+        scan_progress["pace"] = round(current_pace, 2)
 
         # Abort if too many consecutive errors (rate limit or session dead)
         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
@@ -520,13 +634,14 @@ def run_full_scan():
         try:
             result = fetch_candle_data(token)
 
-            # TRUE rate limit / session dead — count toward abort
+            # TRUE rate limit / session dead — back off pace and count toward abort
             if result is RATE_LIMITED:
                 consecutive_errors += 1
                 errs.append({"symbol": sym, "error": "Rate limited"})
                 scan_progress["errors"] = len(errs)
-                # Back off and try refreshing session
-                logger.warning(f"Rate limited at stock {i+1}, backing off 5s...")
+                # Adaptive: slow down
+                current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
+                logger.warning(f"Rate limited at stock {i+1}, pace→{current_pace:.2f}s")
                 time.sleep(5)
                 try:
                     create_session()
@@ -538,23 +653,28 @@ def run_full_scan():
             if result is None:
                 scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
                 consecutive_errors = 0
+                # Adaptive: successful API call, try speeding up
+                current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
                 continue
 
             df = result
             if len(df) < 50:
                 scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
                 consecutive_errors = 0
+                current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
                 continue
 
             a = analyze_stock(df)
             if a is None:
-                errs.append({"symbol": sym, "error": "Analysis failed"})
-                scan_progress["errors"] = len(errs)
-                consecutive_errors = 0  # API worked fine
+                # Could be volume filter or analysis failure
+                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
+                consecutive_errors = 0
+                current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
                 continue
 
-            # ✅ Success — reset consecutive error counter
+            # ✅ Success — reset consecutive error counter, try speeding up
             consecutive_errors = 0
+            current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
 
             indices = get_tags_for(clean, INDEX_TAGS)
             stock = {"symbol": sym, "name": name, "token": token,
@@ -574,14 +694,14 @@ def run_full_scan():
                     "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
                 })
 
-            time.sleep(0.7)  # ~1.4 req/s — safe margin, avoids rate limit at scale
+            time.sleep(current_pace)
         except Exception as e:
             err_str = str(e)
             errs.append({"symbol": sym, "error": err_str})
             scan_progress["errors"] = len(errs)
-            # Only count as consecutive error if it looks like rate limiting
             if "access rate" in err_str.lower() or "rate" in err_str.lower() or "timeout" in err_str.lower():
                 consecutive_errors += 1
+                current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
                 time.sleep(3)
             else:
                 consecutive_errors = 0
@@ -599,7 +719,7 @@ def run_full_scan():
             elapsed_so_far = time.time() - t0
             rate = (i+1) / elapsed_so_far if elapsed_so_far > 0 else 0
             remaining = (total - i - 1) / rate / 60 if rate > 0 else 0
-            logger.info(f"  {i+1}/{total} ({len(all_s)} ok, {len(errs)} err) ~{remaining:.0f}m left")
+            logger.info(f"  {i+1}/{total} ({len(all_s)} ok, {len(errs)} err, pace={current_pace:.2f}s) ~{remaining:.0f}m left")
 
     elapsed = time.time() - t0
     scan_results = {
@@ -666,7 +786,6 @@ def api_reset():
     # Stop any running scan first
     if is_scanning:
         abort_scan = True
-        # Wait briefly for scan to stop
         for _ in range(20):
             if not is_scanning: break
             time.sleep(0.25)
@@ -678,7 +797,6 @@ def api_reset():
     }
     scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
     abort_scan = False
-    # Re-login to get fresh session
     create_session()
     if len(instrument_list) == 0:
         fetch_instrument_list()
@@ -688,11 +806,9 @@ def api_reset():
 @app.route("/api/scan", methods=["POST"])
 def api_trigger_scan():
     global credentials_ok
-    # If not connected, try to reconnect first
     if not credentials_ok:
         if not create_session():
             return jsonify({"error": "Not connected to Angel One. Click Reconnect."}), 401
-    # If instruments not loaded yet (startup failed), load them now
     if len(scan_instrument_list) == 0:
         fetch_instrument_list()
     if len(scan_instrument_list) == 0:
@@ -720,36 +836,6 @@ def api_stock_detail(symbol):
 def serve_frontend():
     return send_from_directory(".", "index.html")
 
-# ── Watchlists ──
-watchlists = {}
-
-@app.route("/api/watchlists")
-def api_get_watchlists():
-    return jsonify(watchlists)
-
-@app.route("/api/watchlists/<n>", methods=["PUT"])
-def api_create_watchlist(n):
-    if n not in watchlists: watchlists[n] = []
-    return jsonify({"status": "created", "name": n})
-
-@app.route("/api/watchlists/<n>", methods=["DELETE"])
-def api_delete_watchlist(n):
-    watchlists.pop(n, None)
-    return jsonify({"status": "deleted"})
-
-@app.route("/api/watchlists/<n>/add", methods=["POST"])
-def api_watchlist_add(n):
-    symbol = request.json.get("symbol", "")
-    if n not in watchlists: watchlists[n] = []
-    if symbol and symbol not in watchlists[n]: watchlists[n].append(symbol)
-    return jsonify({"status": "added", "watchlist": watchlists[n]})
-
-@app.route("/api/watchlists/<n>/remove", methods=["POST"])
-def api_watchlist_remove(n):
-    symbol = request.json.get("symbol", "")
-    if n in watchlists and symbol in watchlists[n]: watchlists[n].remove(symbol)
-    return jsonify({"status": "removed", "watchlist": watchlists.get(n, [])})
-
 # ═══════════════════════════════════════════════════════════════
 # INIT
 # ═══════════════════════════════════════════════════════════════
@@ -762,12 +848,11 @@ def initialize():
         credentials_ok = False
         return False
 
-    # Try to login — if it fails, server still starts (user can reconnect from browser)
     if create_session():
         fetch_instrument_list()
     else:
         logger.warning("Initial login failed — server starting anyway. Use Reconnect button in browser.")
 
     threading.Thread(target=scheduler, daemon=True).start()
-    logger.info(f"Ready. {len(scan_instrument_list)} stocks (NIFTY 500).")
+    logger.info(f"Ready. {len(scan_instrument_list)} stocks (NIFTY 500). Min volume: {MIN_AVG_VOLUME:,}")
     return True

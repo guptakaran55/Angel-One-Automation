@@ -97,6 +97,7 @@ tr{transition:background .1s}tr:hover{background:var(--cdh)}
 const {useState,useEffect,useCallback,useMemo,useRef}=React;
 const API=window.location.origin;
 const fmt=(n,d=2)=>n!=null?Number(n).toFixed(d):'—';
+const fmtVol=(n)=>{if(!n||n===0)return'—';if(n>=10000000)return(n/10000000).toFixed(1)+'Cr';if(n>=100000)return(n/100000).toFixed(1)+'L';if(n>=1000)return(n/1000).toFixed(1)+'K';return String(Math.round(n))};
 const ago=(iso)=>{if(!iso)return'Never';const d=(Date.now()-new Date(iso).getTime())/1e3;if(d<60)return Math.floor(d)+'s';if(d<3600)return Math.floor(d/60)+'m';return Math.floor(d/3600)+'h'};
 const ITAG_CLS={"NIFTY 50":"itag-n50","NIFTY 100":"itag-n100","BSE 100":"itag-bse"};
 const PH_COL={"BUY FLIP":"var(--gn)","EARLY BUY":"#34d399","SELL FLIP":"var(--rd)","EARLY SELL":"#f87171","BULLISH":"var(--gn)","BEARISH":"var(--rd)","NEUTRAL":"var(--t3)"};
@@ -164,7 +165,7 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
   var bb=s.buy_breakdown||{};
   var sc=s.sell_conditions||{};
   var indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv"];
-  var sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA200'},{k:'momentum_reversal',t:'RSI >= 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope',d:'Slope flipped negative'}];
+  var sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA'},{k:'momentum_reversal',t:'RSI >= 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope',d:'Slope flipped negative'}];
   var wlNames=Object.keys(watchlists);
   var pc=PH_COL[s.macd_phase]||'var(--t3)';
   var cv=s.macd_curve||[];
@@ -193,7 +194,10 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
         {s.in_portfolio && <span className="pb">HELD</span>}
       </div>
       <div style={{marginTop:'4px'}}>{s.indices&&s.indices.length>0?<><span style={{fontSize:'9px',color:'var(--t3)',marginRight:'4px'}}>Listed in:</span><ITags indices={s.indices}/></>:<span style={{fontSize:'9px',color:'var(--t3)'}}>NIFTY 500</span>}</div>
-      <div style={{marginTop:'4px',fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}>{'₹'+fmt(s.price)}</div>
+      <div style={{display:'flex',alignItems:'baseline',gap:'10px',marginTop:'4px'}}>
+        <span style={{fontSize:'22px',fontWeight:800,fontFamily:"'JetBrains Mono'"}}> {'₹'+fmt(s.price)}</span>
+        {s.avg_vol_20 && <span style={{fontSize:'9px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}}>{'Vol: '+fmtVol(s.avg_vol_20)+'/day'}</span>}
+      </div>
       {wlNames.length>0 && <div style={{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'}}>
         {wlNames.map(function(wn){var inIt=watchlists[wn]&&watchlists[wn].includes(s.symbol);
           return <button key={wn} className={'btn btn-sm '+(inIt?'btn-r':'btn-pu')} onClick={function(e){e.stopPropagation();onAddToWL(wn,s.symbol,!inIt)}}>{inIt?('✕ '+wn):('+ '+wn)}</button>
@@ -203,7 +207,7 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
     <div className="mob">
       {isGolden && <div style={{padding:'12px',marginBottom:'12px',background:'linear-gradient(135deg,rgba(217,119,6,.1),rgba(234,179,8,.08))',border:'2px solid rgba(217,119,6,.3)',borderRadius:'8px',textAlign:'center'}}>
         <div style={{fontSize:'18px',fontWeight:800,color:'#b45309'}}>{'★ GOLDEN BUY OPPORTUNITY ★'}</div>
-        <div style={{fontSize:'10px',color:'#92400e',marginTop:'4px'}}>{'MACD dipped near 1Y low · slope flat · SMA(200) rising'}</div>
+        <div style={{fontSize:'10px',color:'#92400e',marginTop:'4px'}}>{'MACD dipped near 1Y low · slope flat · SMA rising'}</div>
       </div>}
       <div style={{display:'flex',gap:'10px',marginBottom:'16px'}}>
         <div style={{flex:1,padding:'14px',background:'var(--gg)',borderRadius:'8px',textAlign:'center'}}>
@@ -233,8 +237,9 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
           </div>
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d(MACD)/dt</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_slope>0?'var(--gn)':s.macd_slope<0?'var(--rd)':'var(--t3)'}}>{s.macd_slope!=null?(s.macd_slope>0?'+':'')+s.macd_slope.toFixed(4):'—'}</div></div>
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d²(MACD)/dt²'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_accel>0?'var(--gn)':s.macd_accel<0?'var(--rd)':'var(--t3)'}}>{s.macd_accel!=null?(s.macd_accel>0?'+':'')+s.macd_accel.toFixed(4):'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>MACD %ile (1Y)</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:typeof s.macd_pctl==='number'?(s.macd_pctl<=25?'var(--gn)':s.macd_pctl>=75?'var(--rd)':'var(--t2)'):'var(--t3)'}}>{typeof s.macd_pctl==='number'?s.macd_pctl.toFixed(0)+'%':'—'}</div></div>
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>MACD % of 1Y low</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:typeof s.macd_low_pct==='number'?(s.macd_low_pct>=60?'var(--rd)':'var(--t2)'):'var(--t3)'}}>{typeof s.macd_low_pct==='number'?s.macd_low_pct.toFixed(0)+'%':'—'}</div><div style={{fontSize:'7px',color:'var(--t3)'}}>{typeof s.macd_1y_low==='number'?'1Y low: '+s.macd_1y_low.toFixed(1):''}</div></div>
-          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d(SMA200)/dt'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.sma200_slope>0?'var(--gn)':s.sma200_slope<0?'var(--rd)':'var(--t3)'}}>{typeof s.sma200_slope==='number'?(s.sma200_slope>0?'+':'')+s.sma200_slope.toFixed(3):'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d(SMA)/dt'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.sma200_slope>0?'var(--gn)':s.sma200_slope<0?'var(--rd)':'var(--t3)'}}>{typeof s.sma200_slope==='number'?(s.sma200_slope>0?'+':'')+s.sma200_slope.toFixed(3):'—'}</div></div>
         </div>
         <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
           {s.macd_phase==='BUY FLIP'&&'Slope just crossed zero upward — momentum confirmed bullish'}
@@ -254,6 +259,7 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Acceleration</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_accel>0?'var(--gn)':s.price_accel<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_accel==='number'?(s.price_accel>0?'+':'')+s.price_accel.toFixed(3)+'%':'—'}</div></div>
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>3-day ROC</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_roc3>0?'var(--gn)':s.price_roc3<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_roc3==='number'?(s.price_roc3>0?'+':'')+s.price_roc3.toFixed(2)+'%':'—'}</div></div>
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Up streak</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:(s.up_days||0)>=3?'var(--gn)':'var(--t2)'}}>{(s.up_days||0)+' days'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Avg Volume (20d)</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:'var(--t2)'}}>{fmtVol(s.avg_vol_20)}</div></div>
         </div>
       </div>
 
@@ -288,6 +294,7 @@ function App(){
   var [gbSmaSlope,setGbSmaSlope]=useState(0.1);
   var inputRef=useRef(null);
   var scanRef=useRef(false);
+  var timerRef=useRef(null);
 
   var setAndSaveWL=function(w){setWatchlists(w);saveWL(w)};
   var createWL=function(name){if(!name.trim())return;var w=Object.assign({},watchlists);w[name.trim()]=[];setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
@@ -299,20 +306,39 @@ function App(){
   var fetchAll=useCallback(function(){
     return Promise.all([fetch(API+'/api/results'),fetch(API+'/api/status'),fetch(API+'/api/progress')])
       .then(function(res){return Promise.all(res.map(function(r){return r.json()}))})
-      .then(function(arr){setData(arr[0]);setStatus(arr[1]);setProgress(arr[2]);scanRef.current=!!(arr[0]&&arr[0].status==='scanning')||!!(arr[1]&&arr[1].is_scanning)})
+      .then(function(arr){
+        setData(arr[0]);setStatus(arr[1]);setProgress(arr[2]);
+        var wasScanning=scanRef.current;
+        var nowScanning=!!(arr[0]&&arr[0].status==='scanning')||!!(arr[1]&&arr[1].is_scanning);
+        scanRef.current=nowScanning;
+        // If scanning state changed, reschedule polling
+        if(wasScanning!==nowScanning){scheduleNext(nowScanning)}
+      })
       .catch(function(){})
       .finally(function(){setLoading(false)});
   },[]);
 
+  // Adaptive polling: 2s during scan, 30s when idle
+  var scheduleNext=useCallback(function(isScanning){
+    if(timerRef.current)clearInterval(timerRef.current);
+    var interval=isScanning?2000:30000;
+    timerRef.current=setInterval(function(){fetchAll()},interval);
+  },[fetchAll]);
+
   useEffect(function(){
     fetchAll();
-    var t=setInterval(function(){fetchAll()},5000);
-    return function(){clearInterval(t)};
-  },[fetchAll]);
+    // Start with moderate interval, fetchAll will adjust via scheduleNext
+    timerRef.current=setInterval(function(){fetchAll()},5000);
+    return function(){if(timerRef.current)clearInterval(timerRef.current)};
+  },[fetchAll,scheduleNext]);
 
   var triggerScan=function(){
     setScanError(null);
-    fetch(API+'/api/scan',{method:'POST'}).then(function(r){return r.json()}).then(function(j){if(j.error)setScanError(j.error);fetchAll()}).catch(function(){setScanError('Network error')});
+    fetch(API+'/api/scan',{method:'POST'}).then(function(r){return r.json()}).then(function(j){
+      if(j.error)setScanError(j.error);
+      fetchAll();
+      scheduleNext(true); // switch to fast polling
+    }).catch(function(){setScanError('Network error')});
   };
   var reconnect=function(){
     setScanError(null);
@@ -325,7 +351,9 @@ function App(){
     setScanError(null);
     fetch(API+'/api/reset',{method:'POST'}).then(function(r){return r.json()}).then(function(){
       fetchAll();
-      setTimeout(function(){fetch(API+'/api/scan',{method:'POST'}).then(function(){fetchAll()})},500);
+      setTimeout(function(){
+        fetch(API+'/api/scan',{method:'POST'}).then(function(){fetchAll();scheduleNext(true)})
+      },500);
     }).catch(function(){setScanError('Network error')});
   };
   var doSort=function(k){if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
@@ -426,26 +454,27 @@ function App(){
 
       <div className="sts">
         <div className="st"><div className="stl">NIFTY 500</div><div className="stv" style={{color:'var(--bl)'}}>{nT}</div><div className="sts2">{(progress&&progress.skipped||0)+' skipped'}</div></div>
-        <div className="st"><div className="stl">Buy Signals</div><div className="stv" style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">{'≥60/110'}</div></div>
+        <div className="st"><div className="stl">Buy Signals</div><div className="stv" style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">{'≥60 pts'}</div></div>
         <div className="st"><div className="stl">Sell</div><div className="stv" style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">{'≥3/6'}</div></div>
         <div className="st"><div className="stl">Portfolio</div><div className="stv" style={{color:'var(--pu)'}}>{nP}</div></div>
       </div>
 
       {isSc && (function(){
         var p=progress||{};var pct=p.total>0?Math.round(p.current/p.total*100):0;
+        var paceStr=typeof p.pace==='number'?p.pace.toFixed(2)+'s':'';
         return <div className="scan-bar" style={{flexDirection:'column',gap:'6px'}}>
           <div style={{display:'flex',alignItems:'center',gap:'8px',width:'100%'}}>
             <div className="sp" style={{width:16,height:16,margin:0,borderWidth:2,flexShrink:0}}/>
             <div style={{flex:1}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:'3px'}}>
                 <span className="scan-txt">{(p.current||0)+'/'+(p.total||'?')+' stocks'}</span>
-                <span className="scan-txt">{pct+'%'+(p.ok>0?' · '+p.ok+' analyzed':'')+(p.skipped>0?' · '+p.skipped+' skipped':'')+(p.errors>0?' · '+p.errors+' errors':'')}</span>
+                <span className="scan-txt">{pct+'%'+(p.ok>0?' · '+p.ok+' analyzed':'')+(p.skipped>0?' · '+p.skipped+' skipped':'')+(p.errors>0?' · '+p.errors+' errors':'')+(paceStr?' · pace '+paceStr:'')}</span>
               </div>
               <div className="scan-prog"><div className="scan-fill" style={{width:pct+'%'}}/></div>
             </div>
           </div>
           {p.rate_limited && <div style={{padding:'6px 10px',background:'var(--rg)',borderRadius:'5px',fontSize:'10px',color:'var(--rd)',fontWeight:600,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <span>⚠ Rate limited — scan paused.</span>
+            <span>⚠ Rate limited — scan paused, auto-backing off.</span>
             <button className="btn btn-sm" onClick={resetAndRescan} style={{background:'var(--or)',border:'none',color:'#fff',marginLeft:'8px'}}>↻ Reset</button>
           </div>}
         </div>;
@@ -495,7 +524,7 @@ function App(){
             </div>
           </div>
           <div style={{flex:'1',minWidth:'120px'}}>
-            <div style={{fontSize:'9px',fontWeight:700,color:'var(--t2)',marginBottom:'3px'}}>{'d(SMA200)/dt >'}</div>
+            <div style={{fontSize:'9px',fontWeight:700,color:'var(--t2)',marginBottom:'3px'}}>{'d(SMA)/dt >'}</div>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <input type="range" min="0" max="2" step="0.05" value={gbSmaSlope} onChange={function(e){setGbSmaSlope(Number(e.target.value))}} style={{flex:1,accentColor:'#b45309'}}/>
               <span style={{fontSize:'13px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:'#b45309',minWidth:'35px',textAlign:'right'}}>{gbSmaSlope.toFixed(2)}</span>
@@ -518,7 +547,7 @@ function App(){
             <th>Signal</th>
           </tr></thead>
           <tbody>{stocks.map(function(s){return <tr key={s.symbol} onClick={function(){setSel(s)}} style={{cursor:'pointer'}}>
-            <td><div className="sn"><span className="sns">{s.name}</span>{goldenMatch(s) && <span style={{display:'inline-block',padding:'1px 5px',borderRadius:'3px',fontSize:'8px',fontWeight:700,background:'rgba(217,119,6,.12)',color:'#b45309',marginLeft:'4px'}}>{'★ GOLDEN'}</span>}{s.in_portfolio && <span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}</span></div></td>
+            <td><div className="sn"><span className="sns">{s.name}</span>{goldenMatch(s) && <span style={{display:'inline-block',padding:'1px 5px',borderRadius:'3px',fontSize:'8px',fontWeight:700,background:'rgba(217,119,6,.12)',color:'#b45309',marginLeft:'4px'}}>{'★ GOLDEN'}</span>}{s.in_portfolio && <span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}{s.avg_vol_20?' · Vol '+fmtVol(s.avg_vol_20):''}</span></div></td>
             <td style={{fontWeight:600}}>{'₹'+fmt(s.price)}</td>
             <td><span className={'score score-buy '+(s.buy_score>=75?'strong':'')}>{s.buy_score}</span></td>
             <td><span className="score score-sell">{s.sell_count}</span></td>
