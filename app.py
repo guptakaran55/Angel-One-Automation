@@ -45,7 +45,9 @@ ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
 ZERODHA_API_SECRET = os.getenv("ZERODHA_API_SECRET", "")
 
 # Zerodha session state
-zerodha_access_token = os.getenv("ZERODHA_ACCESS_TOKEN", "") or None
+_zt = os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
+# Sanity: reject URLs or obviously invalid values (real tokens are ~50+ char alphanumeric)
+zerodha_access_token = _zt if (_zt and not _zt.startswith("http") and len(_zt) > 20) else None
 zerodha_user = None  # populated after first successful API call
 
 INDEX_TAGS = build_index_tags()
@@ -804,7 +806,8 @@ def api_status():
                     "missing": check_credentials(),
                     "zerodha_connected": zerodha_access_token is not None,
                     "zerodha_user": zerodha_user.get("user_name","") if zerodha_user else "",
-                    "zerodha_configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)})
+                    "zerodha_configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET),
+                    "login_url": f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else ""})
 
 @app.route("/api/reconnect", methods=["POST"])
 def api_reconnect():
