@@ -1,15 +1,3 @@
-| Condition Type | Description |
-|----------------|-------------|
-| **BUY FLIP** | Slope just turned positive after 2+ days negative |
-| **EARLY BUY** | Slope still negative but decelerating (d² > 0, d < 0) |
-| **SELL FLIP** | Slope just turned negative after 2+ days positive |
-| **EARLY SELL** | Slope still positive but decelerating |
-| **BULLISH** | Slope > 0, acceleration > 0 |
-| **BEARISH** | Slope < 0, acceleration < 0 |
-| **NEUTRAL** | Mixed signals |
-
-
-
 # SignalScope — Indicator & Scoring Reference
 
 SignalScope scans the NIFTY 500 universe daily using 6 technical indicators combined into a weighted buy score (max ~118 pts), 6 binary sell conditions, MACD momentum phase detection, and ATR-based position sizing. This document explains every metric shown in the dashboard.
@@ -130,17 +118,26 @@ SignalScope uses **graduated scoring** — no cliff effects. Points peak at RSI 
 
 ---
 
-### 5. ADX(14) — max 15 pts
+### 5. ADX(14) + Directional Index — max 20 pts
 
-**What:** Is there a strong directional trend (in either direction)?
+**What:** Is there a strong trend **and is it bullish?**
 
-| Condition | Points |
-|-----------|--------|
-| ADX > 25 | 10 |
-| ADX > 30 | +5 bonus |
-| ADX ≤ 25 | 0 |
+ADX alone only measures trend *strength*. A stock crashing in a strong downtrend also has high ADX. SignalScope pairs ADX with the Directional Indicators (+DI and -DI) to ensure points are only awarded for **confirmed uptrends**.
 
-**Why it matters:** ADX measures trend strength, not direction. A high ADX with a positive buy score means the stock is trending *and* the trend is in your favor. Low ADX means the stock is chopping sideways — signals from other indicators are less reliable in a rangebound market.
+| Condition | Points | Meaning |
+|-----------|--------|---------|
+| ADX > 25 AND +DI > -DI | 15 | Strong uptrend confirmed |
+| ADX > 30 AND +DI > -DI | +5 bonus | Very strong uptrend |
+| ADX > 25 AND -DI > +DI | **0** | Strong **downtrend** — no points awarded |
+| ADX ≤ 25 | 0 | Trend too weak to be meaningful |
+
+**+DI (Plus Directional Indicator):** Measures upward price pressure.
+**-DI (Minus Directional Indicator):** Measures downward price pressure.
+When +DI > -DI, bulls are in control. When -DI > +DI, bears are in control.
+
+**Why direction matters:** Without this check, a stock in freefall with ADX 35 would score 15 buy points — actively encouraging you to buy into a confirmed downtrend. The directional filter prevents this.
+
+**Sell condition:** When ADX > 25 AND -DI > +DI, the "Strong Downtrend" sell condition is triggered (see Sell Conditions below).
 
 ---
 
@@ -167,9 +164,9 @@ SignalScope uses **graduated scoring** — no cliff effects. Points peak at RSI 
 
 ---
 
-## Sell Conditions (6 binary checks)
+## Sell Conditions (7 binary checks)
 
-Each condition is independently true or false. Shown as red/grey dots in the dashboard. Sell alert triggers when ≥3 of 6 are true **and** the stock is in your portfolio.
+Each condition is independently true or false. Shown as red/grey dots in the dashboard. Sell alert triggers when ≥3 of 7 are true **and** the stock is in your portfolio.
 
 | # | Condition | Trigger |
 |---|-----------|---------|
@@ -179,6 +176,7 @@ Each condition is independently true or false. Shown as red/grey dots in the das
 | 4 | **Momentum Fade** | MACD < signal line AND histogram negative — bearish crossover |
 | 5 | **Volume Weakness** | OBV lower than 5 days ago — volume leaving |
 | 6 | **MACD Slope Flip** | MACD slope turned negative after 2+ days positive |
+| 7 | **Strong Downtrend** | ADX > 25 AND -DI > +DI — confirmed bearish trend |
 
 ---
 
