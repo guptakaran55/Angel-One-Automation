@@ -16,11 +16,11 @@ v3.1 Changes:
   - Backend watchlist routes removed (frontend localStorage is canonical)
 """
 
-import os, time, threading, logging
+import os, time, threading, logging, hashlib
 from datetime import datetime, timedelta
 from collections import defaultdict
 import numpy as np, pandas as pd, pyotp, requests
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, redirect
 from flask_cors import CORS
 from SmartApi import SmartConnect
 from index_data import get_scan_universe, build_index_tags, get_tags_for
@@ -39,6 +39,16 @@ SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
 # Volume filter: minimum 20-day average volume to analyze a stock
 MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
+
+# Zerodha Kite Connect (for portfolio only — scan still uses Angel One)
+ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
+ZERODHA_API_SECRET = os.getenv("ZERODHA_API_SECRET", "")
+ZERODHA_REDIRECT   = os.getenv("ZERODHA_REDIRECT", "http://127.0.0.1:5000/api/zerodha/callback")
+
+# Zerodha session state
+kite_client = None
+zerodha_access_token = None
+zerodha_user = None  # user profile after login
 
 INDEX_TAGS = build_index_tags()
 SCAN_UNIVERSE = set()  # populated at startup from NIFTY 500
@@ -251,7 +261,8 @@ def calc_adx(high, low, close, p=14):
     plus_di = 100 * (plus_dm.ewm(span=p, adjust=False).mean() / atr)
     minus_di = 100 * (minus_dm.ewm(span=p, adjust=False).mean() / atr)
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
-    return dx.ewm(span=p, adjust=False).mean()
+    adx = dx.ewm(span=p, adjust=False).mean()
+    return adx, plus_di, minus_di
 
 def find_support_resistance(high, low, close, lookback=60):
     """Improved support/resistance with price level clustering."""
@@ -351,7 +362,7 @@ def analyze_stock(df):
     bm,bu,bl = calc_bb(close,20,2)
     ml,ms,mh = calc_macd(close)
     ov = calc_obv(close,vol)
-    adx_s = calc_adx(high,low,close,14)
+    adx_s, plus_di_s, minus_di_s = calc_adx(high,low,close,14)
 
     cbm,cbu,cbl = bm.iloc[-1],bu.iloc[-1],bl.iloc[-1]
     cm,cms,cmh = ml.iloc[-1],ms.iloc[-1],mh.iloc[-1]
@@ -399,6 +410,8 @@ def analyze_stock(df):
     co5 = ov.iloc[-5] if len(ov)>=5 else ov.iloc[0]
     co20 = ov.iloc[-20] if len(ov)>=20 else ov.iloc[0]
     curr_adx = adx_s.iloc[-1] if len(adx_s)>0 and ok(adx_s.iloc[-1]) else 0
+    curr_plus_di = float(plus_di_s.iloc[-1]) if len(plus_di_s)>0 and ok(plus_di_s.iloc[-1]) else 0
+    curr_minus_di = float(minus_di_s.iloc[-1]) if len(minus_di_s)>0 and ok(minus_di_s.iloc[-1]) else 0
     tlb = any(close.iloc[i]<=bl.iloc[i] for i in range(-5,0) if ok(bl.iloc[i]))
     abm = bool(price<=cbm) if ok(cbm) else False
 
@@ -540,11 +553,26 @@ def analyze_stock(df):
     buy_breakdown["bollinger"] = {"pass": bb_p, "pts": bb_pts, "max": 15,
                                    "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
 
-    # 5. ADX(14) — 10 pts + 5 bonus
-    adx_p = bool(curr_adx > 25); adx_str = bool(curr_adx > 30)
-    adx_pts = (10 + (5 if adx_str else 0)) if adx_p else 0; buy_score += adx_pts
-    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 15,
-                             "val": sf(curr_adx), "desc": "ADX > 25" + (" +bonus >30" if adx_str else "")}
+    # 5. ADX(14) + Direction — 15 pts + 5 bonus (only awards in confirmed uptrend)
+    bullish_trend = bool(curr_plus_di > curr_minus_di)
+    adx_strong = bool(curr_adx > 25)
+    adx_very_strong = bool(curr_adx > 30)
+    if adx_strong and bullish_trend:
+        adx_pts = 15 + (5 if adx_very_strong else 0)
+        adx_desc = f"ADX {float(curr_adx):.1f} · +DI({curr_plus_di:.1f}) > -DI({curr_minus_di:.1f}) ↑ uptrend"
+        if adx_very_strong:
+            adx_desc += " +bonus >30"
+    elif adx_strong and not bullish_trend:
+        adx_pts = 0
+        adx_desc = f"ADX {float(curr_adx):.1f} · -DI({curr_minus_di:.1f}) > +DI({curr_plus_di:.1f}) ↓ downtrend — no points"
+    else:
+        adx_pts = 0
+        adx_desc = f"ADX {float(curr_adx):.1f} ≤ 25 — weak trend"
+    adx_p = adx_pts > 0
+    buy_score += adx_pts
+    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 20,
+                             "val": sf(curr_adx), "desc": adx_desc,
+                             "plus_di": sf(curr_plus_di, 1), "minus_di": sf(curr_minus_di, 1)}
 
     # 6. OBV — 5 pts
     obv_p = bool(co > co5 and co > co20)
@@ -561,6 +589,7 @@ def analyze_stock(df):
         "momentum_fade": bool(cm<cms and cmh<0) if ok(cm) and ok(cms) else False,
         "volume_weakness": bool(co<co5),
         "macd_slope_flip": slope_cross_dn,
+        "strong_downtrend": bool(curr_adx > 25 and not bullish_trend),
     }
     sell_count = sum(sell_c.values())
 
@@ -588,7 +617,8 @@ def analyze_stock(df):
         "macd":sf(cm,4),"macd_signal":sf(cms,4),"macd_hist":sf(cmh,4),
         "macd_slope":round(macd_slope,4),"macd_accel":round(macd_accel,4),"macd_pctl":macd_pctl,"macd_low_pct":macd_low_pct,"macd_1y_low":round(macd_1y_low,2),
         "macd_phase":macd_phase,"macd_curve":macd_curve,"macd_zero_y":macd_zero_y,
-        "obv":sf(co,0),"adx":sf(curr_adx),
+        "obv":sf(co,0),"adx":sf(curr_adx),"plus_di":sf(curr_plus_di,1),"minus_di":sf(curr_minus_di,1),
+        "adx_bullish":bullish_trend,
         "avg_vol_20":round(avg_vol_20, 0),
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
         "price_accel":round(price_accel,3),"up_days":up_days,
@@ -596,7 +626,7 @@ def analyze_stock(df):
         "atr":round(atr,2),"risk_in_atrs":risk_in_atrs,"position_size":position_size,
         "capital_needed":capital_needed,"potential_profit":potential_profit,"roc_pct":roc_pct,
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
-        "sell_conditions":sell_c,"sell_count":f"{sell_count}/6","sell_pct":sell_count/6*100,
+        "sell_conditions":sell_c,"sell_count":f"{sell_count}/7","sell_pct":sell_count/7*100,
         "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,"is_sell":sell_count>=3,
         "golden_buy":golden_buy,
     }
@@ -773,7 +803,10 @@ def api_status():
                     "instruments_scan": len(scan_instrument_list),
                     "last_scan": scan_results.get("last_scan"),
                     "scan_status": scan_results.get("status"), "is_scanning": is_scanning,
-                    "missing": check_credentials()})
+                    "missing": check_credentials(),
+                    "zerodha_connected": zerodha_access_token is not None,
+                    "zerodha_user": zerodha_user.get("user_name","") if zerodha_user else "",
+                    "zerodha_configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)})
 
 @app.route("/api/reconnect", methods=["POST"])
 def api_reconnect():
@@ -851,6 +884,185 @@ def api_stock_detail(symbol):
 @app.route("/")
 def serve_frontend():
     return send_from_directory(".", "index.html")
+
+# ═══════════════════════════════════════════════════════════════
+# ZERODHA KITE CONNECT — OAuth + Portfolio
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/zerodha/status")
+def zerodha_status():
+    """Check if Zerodha is configured and connected."""
+    configured = bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)
+    connected = zerodha_access_token is not None
+    user_name = zerodha_user.get("user_name", "") if zerodha_user else ""
+    user_id = zerodha_user.get("user_id", "") if zerodha_user else ""
+    return jsonify({
+        "configured": configured,
+        "connected": connected,
+        "user_name": user_name,
+        "user_id": user_id,
+    })
+
+@app.route("/api/zerodha/login")
+def zerodha_login():
+    """Redirect user to Zerodha login page. After login, Zerodha redirects back to /api/zerodha/callback."""
+    if not ZERODHA_API_KEY:
+        return jsonify({"error": "ZERODHA_API_KEY not set"}), 400
+    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}"
+    return redirect(login_url)
+
+@app.route("/api/zerodha/callback")
+def zerodha_callback():
+    """OAuth callback — Zerodha redirects here with request_token after login."""
+    global zerodha_access_token, zerodha_user, kite_client
+    request_token = request.args.get("request_token")
+    if not request_token:
+        return "<h2>Error: No request_token received from Zerodha</h2>", 400
+
+    try:
+        # Generate access token: SHA256(api_key + request_token + api_secret)
+        checksum = hashlib.sha256(
+            (ZERODHA_API_KEY + request_token + ZERODHA_API_SECRET).encode("utf-8")
+        ).hexdigest()
+
+        resp = requests.post("https://api.kite.trade/session/token", data={
+            "api_key": ZERODHA_API_KEY,
+            "request_token": request_token,
+            "checksum": checksum,
+        })
+        data = resp.json()
+
+        if data.get("status") != "success":
+            err_msg = data.get("message", "Unknown error")
+            logger.error(f"Zerodha token exchange failed: {err_msg}")
+            return f"""<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+                <h2>Zerodha Login Failed</h2><p>{err_msg}</p>
+                <a href="/">← Back to SignalScope</a></body></html>""", 400
+
+        zerodha_access_token = data["data"]["access_token"]
+        zerodha_user = data["data"]
+        user_name = data["data"].get("user_name", "")
+        user_id = data["data"].get("user_id", "")
+        logger.info(f"Zerodha connected: {user_name} ({user_id})")
+
+        # Redirect back to frontend
+        return f"""<html><head><meta http-equiv="refresh" content="1;url=/"></head>
+            <body style="font-family:sans-serif;text-align:center;padding:60px">
+            <h2>✅ Connected to Zerodha</h2>
+            <p>Welcome, {user_name} ({user_id})</p>
+            <p>Redirecting to SignalScope...</p>
+            <a href="/">← Go now</a></body></html>"""
+
+    except Exception as e:
+        logger.error(f"Zerodha callback error: {e}")
+        return f"""<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+            <h2>Error</h2><p>{str(e)}</p>
+            <a href="/">← Back to SignalScope</a></body></html>""", 500
+
+@app.route("/api/zerodha/logout", methods=["POST"])
+def zerodha_logout():
+    """Clear Zerodha session."""
+    global zerodha_access_token, zerodha_user, kite_client
+    zerodha_access_token = None
+    zerodha_user = None
+    kite_client = None
+    return jsonify({"status": "logged_out"})
+
+@app.route("/api/zerodha/holdings")
+def zerodha_holdings():
+    """Fetch portfolio holdings from Zerodha and cross-reference with scan results."""
+    if not zerodha_access_token:
+        return jsonify({"error": "Not connected to Zerodha. Click 'Connect Zerodha' first."}), 401
+
+    try:
+        headers = {"Authorization": f"token {ZERODHA_API_KEY}:{zerodha_access_token}"}
+        resp = requests.get("https://api.kite.trade/portfolio/holdings", headers=headers)
+        data = resp.json()
+
+        if data.get("status") != "success":
+            err_msg = data.get("message", "Unknown error")
+            # Token might have expired
+            if "token" in err_msg.lower() or "session" in err_msg.lower():
+                return jsonify({"error": "Zerodha session expired. Please reconnect.", "expired": True}), 401
+            return jsonify({"error": err_msg}), 400
+
+        raw_holdings = data.get("data", [])
+        holdings = []
+        all_stocks = scan_results.get("all_stocks", [])
+        # Build lookup by tradingsymbol for fast matching
+        scan_lookup = {}
+        for s in all_stocks:
+            clean = s["symbol"].replace("-EQ", "")
+            scan_lookup[clean] = s
+
+        for h in raw_holdings:
+            tsym = h.get("tradingsymbol", "")
+            qty = h.get("quantity", 0)
+            if qty <= 0:
+                continue  # skip sold-out positions
+
+            avg_price = float(h.get("average_price", 0))
+            ltp = float(h.get("last_price", 0))
+            day_change = float(h.get("day_change", 0))
+            day_change_pct = float(h.get("day_change_percentage", 0))
+            pnl = float(h.get("pnl", 0))
+            invested = avg_price * qty
+            current_val = ltp * qty
+            total_return_pct = ((current_val - invested) / invested * 100) if invested > 0 else 0
+
+            holding = {
+                "tradingsymbol": tsym,
+                "exchange": h.get("exchange", "NSE"),
+                "quantity": qty,
+                "avg_price": round(avg_price, 2),
+                "ltp": round(ltp, 2),
+                "day_change": round(day_change, 2),
+                "day_change_pct": round(day_change_pct, 2),
+                "pnl": round(pnl, 2),
+                "invested": round(invested, 2),
+                "current_val": round(current_val, 2),
+                "total_return_pct": round(total_return_pct, 2),
+            }
+
+            # Merge with scan data if available
+            scan_data = scan_lookup.get(tsym)
+            if scan_data:
+                holding["scan"] = scan_data
+            else:
+                holding["scan"] = None  # stock not in scan results (maybe not in NIFTY 500)
+
+            holdings.append(holding)
+
+        # Sort by current value descending
+        holdings.sort(key=lambda x: x["current_val"], reverse=True)
+
+        # Portfolio summary
+        total_invested = sum(h["invested"] for h in holdings)
+        total_current = sum(h["current_val"] for h in holdings)
+        total_pnl = total_current - total_invested
+        total_return = (total_pnl / total_invested * 100) if total_invested > 0 else 0
+        day_pnl = sum(h["day_change"] * h["quantity"] for h in holdings)
+
+        # Count sell alerts
+        sell_alerts = [h for h in holdings if h["scan"] and h["scan"].get("is_sell")]
+
+        return jsonify({
+            "holdings": holdings,
+            "summary": {
+                "total_stocks": len(holdings),
+                "total_invested": round(total_invested, 2),
+                "total_current": round(total_current, 2),
+                "total_pnl": round(total_pnl, 2),
+                "total_return_pct": round(total_return, 2),
+                "day_pnl": round(day_pnl, 2),
+                "sell_alerts": len(sell_alerts),
+                "with_scan_data": sum(1 for h in holdings if h["scan"]),
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Zerodha holdings error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # ═══════════════════════════════════════════════════════════════
 # INIT
