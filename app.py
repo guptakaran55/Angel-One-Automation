@@ -413,6 +413,7 @@ def analyze_stock(df):
     curr_plus_di = float(plus_di_s.iloc[-1]) if len(plus_di_s)>0 and ok(plus_di_s.iloc[-1]) else 0
     curr_minus_di = float(minus_di_s.iloc[-1]) if len(minus_di_s)>0 and ok(minus_di_s.iloc[-1]) else 0
     tlb = any(close.iloc[i]<=bl.iloc[i] for i in range(-5,0) if ok(bl.iloc[i]))
+    tub = any(close.iloc[i]>=bu.iloc[i] for i in range(-5,0) if ok(bu.iloc[i]))
     abm = bool(price<=cbm) if ok(cbm) else False
 
     support, resistance = find_support_resistance(high,low,close, min(60, n_candles - 10))
@@ -434,6 +435,7 @@ def analyze_stock(df):
     # MACD zero-cross detection: MACD just turned positive from ≤0
     cm_prev_val = ml.iloc[-2] if len(ml) >= 2 else 0
     macd_zero_cross_up = bool(ok(cm) and cm > 0 and cm < 0.15 and ok(cm_prev_val) and cm_prev_val <= 0)
+    macd_zero_cross_dn = bool(ok(cm) and cm < 0 and cm > -0.15 and ok(cm_prev_val) and cm_prev_val >= 0)
 
     # Mini MACD curve (last 20 values, normalised for sparkline)
     # CRITICAL: always include 0 in the normalization range so the zero line
@@ -582,16 +584,111 @@ def analyze_stock(df):
 
     buy_signal = "STRONG BUY" if buy_score >= 75 else ("MODERATE BUY" if buy_score >= 60 else "NO SIGNAL")
 
-    sell_c = {
-        "trend_break": bool(price<s200) if ok(s200) else False,
-        "momentum_reversal": bool(r14>=65) if ok(r14) else False,
-        "volatility_extreme": bool(price>=cbu) if ok(cbu) else False,
-        "momentum_fade": bool(cm<cms and cmh<0) if ok(cm) and ok(cms) else False,
-        "volume_weakness": bool(co<co5),
-        "macd_slope_flip": slope_cross_dn,
-        "strong_downtrend": bool(curr_adx > 25 and not bullish_trend),
-    }
-    sell_count = sum(sell_c.values())
+    # ══════════════════════════════════════════════════════════
+    # SELL SCORE — Weighted (max ~105 pts)
+    # Revised weights: SMA(25), MACD(28), RSI(20), BB(10), ADX(15), OBV(10)
+    # STRONG SELL requires at least one "structural" signal (SMA break or ADX bearish)
+    # ══════════════════════════════════════════════════════════
+    sell_score = 0; sell_breakdown = {}
+
+    # 1. SMA Trend Break — 25 pts (highest weight — most reliable daily trend-change signal)
+    sma_sell_p = bool(price < s200) if ok(s200) else False
+    sma_sell_pts = 25 if sma_sell_p else 0
+    sell_score += sma_sell_pts
+    sell_breakdown["sma_break"] = {"pass": sma_sell_p, "pts": sma_sell_pts, "max": 25,
+        "val": sf(s200), "desc": "Close < SMA(200) — below long-term trend" if sma_sell_p else "Price above SMA(200) — trend intact"}
+
+    # 2. MACD INFLECTION (SELL) — 25 pts (reduced from 35 to prevent premature exits on 1-day wiggles)
+    #    Still uses slope/acceleration logic (not lagging crossover)
+    sell_macd_pts = 0
+    sell_macd_desc = ""
+    if macd_zero_cross_dn and macd_accel < 0:
+        sell_macd_pts = 25
+        sell_macd_desc = "MACD crossed 0↓ + deceleration (PRIME EXIT)"
+    elif slope_cross_dn:
+        sell_macd_pts = 18
+        sell_macd_desc = "Slope flipped negative ↓ (SELL FLIP)"
+    elif early_sell:
+        sell_macd_pts = 8
+        sell_macd_desc = "Rise slowing (d²<0, d>0) — early warning"
+    # Bonus: if MACD is in top 25% of 1Y range during inflection → +3
+    sell_pctl_bonus = 0
+    if macd_pctl >= 75 and sell_macd_pts > 0:
+        sell_pctl_bonus = 3
+        sell_macd_desc += f" +pctl bonus ({macd_pctl:.0f}%ile)"
+    sell_macd_pass = sell_macd_pts > 0
+    sell_score += sell_macd_pts + sell_pctl_bonus
+    sell_breakdown["macd_inflection"] = {"pass": sell_macd_pass, "pts": sell_macd_pts + sell_pctl_bonus, "max": 28,
+        "val": sf(macd_slope, 4), "desc": sell_macd_desc or "No bearish inflection detected"}
+
+    # 3. RSI Overheated — GRADUATED (max 20 pts, clear point table)
+    #    60-64: 8 pts | 65-69: 15 pts | 70+: 20 pts | >85: 10 pts (parabolic caution)
+    rsi_sell_pts = 0
+    rsi_sell_desc = ""
+    if ok(r14):
+        r = float(r14)
+        if r > 85:
+            rsi_sell_pts = 10  # extremely overbought — parabolic, could snap either way
+            rsi_sell_desc = f"RSI {r:.1f} — extremely overbought (parabolic risk)"
+        elif r >= 70:
+            rsi_sell_pts = 20
+            rsi_sell_desc = f"RSI {r:.1f} — overbought (max pts)"
+        elif r >= 65:
+            rsi_sell_pts = 15
+            rsi_sell_desc = f"RSI {r:.1f} — approaching overbought"
+        elif r >= 60:
+            rsi_sell_pts = 8
+            rsi_sell_desc = f"RSI {r:.1f} — elevated, early warning"
+        else:
+            rsi_sell_pts = 0
+            rsi_sell_desc = f"RSI {r:.1f} (below sell zone)"
+    else:
+        rsi_sell_desc = "RSI unavailable"
+    sell_score += rsi_sell_pts
+    sell_breakdown["rsi"] = {"pass": rsi_sell_pts > 0, "pts": rsi_sell_pts, "max": 20,
+        "val": sf(r14), "desc": rsi_sell_desc}
+
+    # 4. Bollinger Stretch — 10 pts (secondary signal, kept same)
+    bb_sell_upper = bool(price >= cbu) if ok(cbu) else False
+    bb_sell_pts = 10 if bb_sell_upper else (5 if tub else 0)
+    sell_score += bb_sell_pts
+    sell_breakdown["bollinger"] = {"pass": bb_sell_pts > 0, "pts": bb_sell_pts, "max": 10,
+        "val": sf(cbu), "desc": ("At/above upper BB" if bb_sell_upper else "Touched upper BB recently") if bb_sell_pts > 0 else "Below upper band"}
+
+    # 5. ADX + Bearish Direction — 15 pts (structural signal)
+    adx_sell_pts = 0
+    adx_sell_desc = ""
+    bearish_trend = bool(curr_minus_di > curr_plus_di)
+    if curr_adx > 25 and bearish_trend:
+        adx_sell_pts = 10 + (5 if curr_adx > 30 else 0)
+        adx_sell_desc = f"ADX {float(curr_adx):.1f} · -DI({curr_minus_di:.1f}) > +DI({curr_plus_di:.1f}) ↓ confirmed downtrend"
+        if curr_adx > 30:
+            adx_sell_desc += " +bonus >30"
+    elif curr_adx > 25 and not bearish_trend:
+        adx_sell_desc = f"ADX {float(curr_adx):.1f} · +DI > -DI — uptrend, no sell pts"
+    else:
+        adx_sell_desc = f"ADX {float(curr_adx):.1f} ≤ 25 — weak trend"
+    sell_score += adx_sell_pts
+    sell_breakdown["adx"] = {"pass": adx_sell_pts > 0, "pts": adx_sell_pts, "max": 15,
+        "val": sf(curr_adx), "desc": adx_sell_desc}
+
+    # 6. OBV Declining — 10 pts (doubled — distribution is meaningful on exits)
+    obv_sell_p = bool(co < co5 and co < co20)
+    obv_sell_pts = 10 if obv_sell_p else 0
+    sell_score += obv_sell_pts
+    sell_breakdown["obv"] = {"pass": obv_sell_p, "pts": obv_sell_pts, "max": 10,
+        "val": sf(co, 0), "desc": "OBV falling vs 5d & 20d — distribution" if obv_sell_p else "OBV holding or rising"}
+
+    # ── Structural gate: STRONG SELL requires at least one structural signal ──
+    # Structural = SMA break or ADX bearish. Without these, cap at MODERATE SELL.
+    # This prevents "STRONG SELL" from firing purely on momentum signals in an intact uptrend.
+    has_structural_sell = sma_sell_p or (adx_sell_pts > 0)
+    if sell_score >= 65 and has_structural_sell:
+        sell_signal = "STRONG SELL"
+    elif sell_score >= 45:
+        sell_signal = "MODERATE SELL"
+    else:
+        sell_signal = "NO SIGNAL"
 
     # ── Price Rate of Change & Acceleration ──
     p0 = float(close.iloc[-1])
@@ -626,8 +723,9 @@ def analyze_stock(df):
         "atr":round(atr,2),"risk_in_atrs":risk_in_atrs,"position_size":position_size,
         "capital_needed":capital_needed,"potential_profit":potential_profit,"roc_pct":roc_pct,
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
-        "sell_conditions":sell_c,"sell_count":f"{sell_count}/7","sell_pct":sell_count/7*100,
-        "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,"is_sell":sell_count>=3,
+        "sell_score":sell_score,"sell_signal":sell_signal,"sell_breakdown":sell_breakdown,
+        "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,
+        "is_sell":sell_score>=65,"is_moderate_sell":sell_score>=45,
         "golden_buy":golden_buy,
     }
 
@@ -729,14 +827,14 @@ def run_full_scan():
             scan_progress["ok"] = len(all_s)
 
             if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
-            if a["is_sell"] and token in ptokens: sells.append(stock)
+            if (a["is_sell"] or a["is_moderate_sell"]) and token in ptokens: sells.append(stock)
 
             # Update scan_results live so frontend can show partial results
             if len(all_s) % 10 == 0:
                 scan_results.update({
                     "total_scanned": len(all_s),
                     "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
-                    "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
+                    "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
                     "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
                 })
 
@@ -772,7 +870,7 @@ def run_full_scan():
         "last_scan": datetime.now().isoformat(), "status": "complete",
         "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
         "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
-        "sell_signals": sorted(sells, key=lambda x: x["sell_pct"], reverse=True),
+        "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
         "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
         "portfolio_holdings": portfolio, "errors": errs,
     }
@@ -1065,7 +1163,7 @@ def zerodha_holdings():
         total_pnl = total_current - total_invested
         total_return = (total_pnl / total_invested * 100) if total_invested > 0 else 0
         day_pnl = sum(h["day_change"] * h["quantity"] for h in holdings)
-        sell_alerts = [h for h in holdings if h["scan"] and h["scan"].get("is_sell")]
+        sell_alerts = [h for h in holdings if h["scan"] and (h["scan"].get("is_sell") or h["scan"].get("is_moderate_sell"))]
 
         return jsonify({
             "holdings": holdings,
