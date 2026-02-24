@@ -20,7 +20,7 @@ import os, time, threading, logging, hashlib
 from datetime import datetime, timedelta
 from collections import defaultdict
 import numpy as np, pandas as pd, pyotp, requests
-from flask import Flask, jsonify, request, send_from_directory, redirect
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from SmartApi import SmartConnect
 from index_data import get_scan_universe, build_index_tags, get_tags_for
@@ -43,12 +43,10 @@ MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
 # Zerodha Kite Connect (for portfolio only — scan still uses Angel One)
 ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
 ZERODHA_API_SECRET = os.getenv("ZERODHA_API_SECRET", "")
-ZERODHA_REDIRECT   = os.getenv("ZERODHA_REDIRECT", "http://127.0.0.1:5000/api/zerodha/callback")
 
 # Zerodha session state
-kite_client = None
-zerodha_access_token = None
-zerodha_user = None  # user profile after login
+zerodha_access_token = os.getenv("ZERODHA_ACCESS_TOKEN", "") or None
+zerodha_user = None  # populated after first successful API call
 
 INDEX_TAGS = build_index_tags()
 SCAN_UNIVERSE = set()  # populated at startup from NIFTY 500
@@ -886,41 +884,64 @@ def serve_frontend():
     return send_from_directory(".", "index.html")
 
 # ═══════════════════════════════════════════════════════════════
-# ZERODHA KITE CONNECT — OAuth + Portfolio
+# ZERODHA KITE CONNECT — Hybrid Auth + Portfolio
 # ═══════════════════════════════════════════════════════════════
+# Two ways to connect:
+# 1. Pre-set ZERODHA_ACCESS_TOKEN env var (daily manual refresh)
+# 2. In-app flow: open Kite login → copy request_token → paste in UI
+#    → backend exchanges for access_token automatically
+
+def _zerodha_headers():
+    """Auth headers for Kite API calls."""
+    return {"Authorization": f"token {ZERODHA_API_KEY}:{zerodha_access_token}"}
+
+def _verify_zerodha_token():
+    """Verify token by fetching profile. Returns user dict or None."""
+    global zerodha_user
+    if not zerodha_access_token or not ZERODHA_API_KEY:
+        return None
+    try:
+        resp = requests.get("https://api.kite.trade/user/profile", headers=_zerodha_headers(), timeout=10)
+        data = resp.json()
+        if data.get("status") == "success":
+            zerodha_user = data["data"]
+            logger.info(f"Zerodha token valid: {zerodha_user.get('user_name','')} ({zerodha_user.get('user_id','')})")
+            return zerodha_user
+        else:
+            logger.warning(f"Zerodha token invalid: {data.get('message','')}")
+            return None
+    except Exception as e:
+        logger.warning(f"Zerodha token verify failed: {e}")
+        return None
 
 @app.route("/api/zerodha/status")
 def zerodha_status():
-    """Check if Zerodha is configured and connected."""
     configured = bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)
     connected = zerodha_access_token is not None
     user_name = zerodha_user.get("user_name", "") if zerodha_user else ""
     user_id = zerodha_user.get("user_id", "") if zerodha_user else ""
+    # Build login URL for the frontend to open in a new tab
+    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else ""
     return jsonify({
         "configured": configured,
         "connected": connected,
         "user_name": user_name,
         "user_id": user_id,
+        "login_url": login_url,
     })
 
-@app.route("/api/zerodha/login")
-def zerodha_login():
-    """Redirect user to Zerodha login page. After login, Zerodha redirects back to /api/zerodha/callback."""
-    if not ZERODHA_API_KEY:
-        return jsonify({"error": "ZERODHA_API_KEY not set"}), 400
-    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}"
-    return redirect(login_url)
-
-@app.route("/api/zerodha/callback")
-def zerodha_callback():
-    """OAuth callback — Zerodha redirects here with request_token after login."""
-    global zerodha_access_token, zerodha_user, kite_client
-    request_token = request.args.get("request_token")
+@app.route("/api/zerodha/exchange_token", methods=["POST"])
+def zerodha_exchange_token():
+    """Exchange a request_token (pasted by user from redirect URL) for an access_token."""
+    global zerodha_access_token, zerodha_user
+    body = request.get_json() or {}
+    request_token = body.get("request_token", "").strip()
     if not request_token:
-        return "<h2>Error: No request_token received from Zerodha</h2>", 400
+        return jsonify({"error": "No request_token provided"}), 400
+    if not ZERODHA_API_KEY or not ZERODHA_API_SECRET:
+        return jsonify({"error": "ZERODHA_API_KEY / ZERODHA_API_SECRET not configured"}), 400
 
     try:
-        # Generate access token: SHA256(api_key + request_token + api_secret)
         checksum = hashlib.sha256(
             (ZERODHA_API_KEY + request_token + ZERODHA_API_SECRET).encode("utf-8")
         ).hexdigest()
@@ -929,59 +950,65 @@ def zerodha_callback():
             "api_key": ZERODHA_API_KEY,
             "request_token": request_token,
             "checksum": checksum,
-        })
+        }, timeout=15)
         data = resp.json()
 
         if data.get("status") != "success":
-            err_msg = data.get("message", "Unknown error")
+            err_msg = data.get("message", "Unknown error from Zerodha")
             logger.error(f"Zerodha token exchange failed: {err_msg}")
-            return f"""<html><body style="font-family:sans-serif;text-align:center;padding:60px">
-                <h2>Zerodha Login Failed</h2><p>{err_msg}</p>
-                <a href="/">← Back to SignalScope</a></body></html>""", 400
+            return jsonify({"error": err_msg}), 400
 
         zerodha_access_token = data["data"]["access_token"]
         zerodha_user = data["data"]
         user_name = data["data"].get("user_name", "")
         user_id = data["data"].get("user_id", "")
-        logger.info(f"Zerodha connected: {user_name} ({user_id})")
-
-        # Redirect back to frontend
-        return f"""<html><head><meta http-equiv="refresh" content="1;url=/"></head>
-            <body style="font-family:sans-serif;text-align:center;padding:60px">
-            <h2>✅ Connected to Zerodha</h2>
-            <p>Welcome, {user_name} ({user_id})</p>
-            <p>Redirecting to SignalScope...</p>
-            <a href="/">← Go now</a></body></html>"""
+        logger.info(f"Zerodha connected via token exchange: {user_name} ({user_id})")
+        return jsonify({
+            "status": "connected",
+            "user_name": user_name,
+            "user_id": user_id,
+        })
 
     except Exception as e:
-        logger.error(f"Zerodha callback error: {e}")
-        return f"""<html><body style="font-family:sans-serif;text-align:center;padding:60px">
-            <h2>Error</h2><p>{str(e)}</p>
-            <a href="/">← Back to SignalScope</a></body></html>""", 500
+        logger.error(f"Zerodha token exchange error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/set_token", methods=["POST"])
+def zerodha_set_token():
+    """Directly set an access_token (if user already has one)."""
+    global zerodha_access_token, zerodha_user
+    body = request.get_json() or {}
+    token = body.get("access_token", "").strip()
+    if not token:
+        return jsonify({"error": "No access_token provided"}), 400
+
+    zerodha_access_token = token
+    user = _verify_zerodha_token()
+    if user:
+        return jsonify({"status": "connected", "user_name": user.get("user_name", ""), "user_id": user.get("user_id", "")})
+    else:
+        zerodha_access_token = None
+        return jsonify({"error": "Token is invalid or expired"}), 401
 
 @app.route("/api/zerodha/logout", methods=["POST"])
 def zerodha_logout():
-    """Clear Zerodha session."""
-    global zerodha_access_token, zerodha_user, kite_client
+    global zerodha_access_token, zerodha_user
     zerodha_access_token = None
     zerodha_user = None
-    kite_client = None
     return jsonify({"status": "logged_out"})
 
 @app.route("/api/zerodha/holdings")
 def zerodha_holdings():
     """Fetch portfolio holdings from Zerodha and cross-reference with scan results."""
     if not zerodha_access_token:
-        return jsonify({"error": "Not connected to Zerodha. Click 'Connect Zerodha' first."}), 401
+        return jsonify({"error": "Not connected to Zerodha. Use 'Connect Zerodha' first."}), 401
 
     try:
-        headers = {"Authorization": f"token {ZERODHA_API_KEY}:{zerodha_access_token}"}
-        resp = requests.get("https://api.kite.trade/portfolio/holdings", headers=headers)
+        resp = requests.get("https://api.kite.trade/portfolio/holdings", headers=_zerodha_headers(), timeout=15)
         data = resp.json()
 
         if data.get("status") != "success":
             err_msg = data.get("message", "Unknown error")
-            # Token might have expired
             if "token" in err_msg.lower() or "session" in err_msg.lower():
                 return jsonify({"error": "Zerodha session expired. Please reconnect.", "expired": True}), 401
             return jsonify({"error": err_msg}), 400
@@ -989,7 +1016,6 @@ def zerodha_holdings():
         raw_holdings = data.get("data", [])
         holdings = []
         all_stocks = scan_results.get("all_stocks", [])
-        # Build lookup by tradingsymbol for fast matching
         scan_lookup = {}
         for s in all_stocks:
             clean = s["symbol"].replace("-EQ", "")
@@ -999,7 +1025,7 @@ def zerodha_holdings():
             tsym = h.get("tradingsymbol", "")
             qty = h.get("quantity", 0)
             if qty <= 0:
-                continue  # skip sold-out positions
+                continue
 
             avg_price = float(h.get("average_price", 0))
             ltp = float(h.get("last_price", 0))
@@ -1024,26 +1050,18 @@ def zerodha_holdings():
                 "total_return_pct": round(total_return_pct, 2),
             }
 
-            # Merge with scan data if available
             scan_data = scan_lookup.get(tsym)
-            if scan_data:
-                holding["scan"] = scan_data
-            else:
-                holding["scan"] = None  # stock not in scan results (maybe not in NIFTY 500)
+            holding["scan"] = scan_data  # None if not in scan results
 
             holdings.append(holding)
 
-        # Sort by current value descending
         holdings.sort(key=lambda x: x["current_val"], reverse=True)
 
-        # Portfolio summary
         total_invested = sum(h["invested"] for h in holdings)
         total_current = sum(h["current_val"] for h in holdings)
         total_pnl = total_current - total_invested
         total_return = (total_pnl / total_invested * 100) if total_invested > 0 else 0
         day_pnl = sum(h["day_change"] * h["quantity"] for h in holdings)
-
-        # Count sell alerts
         sell_alerts = [h for h in holdings if h["scan"] and h["scan"].get("is_sell")]
 
         return jsonify({
@@ -1080,6 +1098,14 @@ def initialize():
         fetch_instrument_list()
     else:
         logger.warning("Initial login failed — server starting anyway. Use Reconnect button in browser.")
+
+    # Verify Zerodha token if provided via env var
+    if zerodha_access_token and ZERODHA_API_KEY:
+        logger.info("Verifying Zerodha access token from env var...")
+        if _verify_zerodha_token():
+            logger.info("Zerodha token valid — portfolio ready.")
+        else:
+            logger.warning("Zerodha token from env var is invalid/expired. Use in-app login flow.")
 
     threading.Thread(target=scheduler, daemon=True).start()
     logger.info(f"Ready. {len(scan_instrument_list)} stocks (NIFTY 500). Min volume: {MIN_AVG_VOLUME:,}")
