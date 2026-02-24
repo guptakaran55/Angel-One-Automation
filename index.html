@@ -167,7 +167,7 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
   var bb=s.buy_breakdown||{};
   var sc=s.sell_conditions||{};
   var indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv"];
-  var sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA'},{k:'momentum_reversal',t:'RSI >= 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope',d:'Slope flipped negative'}];
+  var sellI=[{k:'trend_break',t:'Trend Break',d:'Close < SMA'},{k:'momentum_reversal',t:'RSI >= 65',d:'Overbought'},{k:'volatility_extreme',t:'Upper BB',d:'Stretched'},{k:'momentum_fade',t:'MACD Fade',d:'Bearish cross'},{k:'volume_weakness',t:'OBV Drop',d:'Volume leaving'},{k:'macd_slope_flip',t:'MACD Slope',d:'Slope flipped negative'},{k:'strong_downtrend',t:'Downtrend',d:'ADX>25 & -DI > +DI'}];
   var wlNames=Object.keys(watchlists);
   var pc=PH_COL[s.macd_phase]||'var(--t3)';
   var cv=s.macd_curve||[];
@@ -307,6 +307,9 @@ function App(){
   var [gbSlopeMin,setGbSlopeMin]=useState(-0.5);
   var [gbSlopeMax,setGbSlopeMax]=useState(0.2);
   var [gbSmaSlope,setGbSmaSlope]=useState(0.1);
+  var [zerodhaHoldings,setZerodhaHoldings]=useState(null);
+  var [zerodhaLoading,setZerodhaLoading]=useState(false);
+  var [zerodhaError,setZerodhaError]=useState(null);
   var inputRef=useRef(null);
   var scanRef=useRef(false);
   var timerRef=useRef(null);
@@ -372,6 +375,26 @@ function App(){
     }).catch(function(){setScanError('Network error')});
   };
   var doSort=function(k){if(sortK===k)setSortA(!sortA);else{setSortK(k);setSortA(false)}};
+
+  // Zerodha
+  var zConf=status&&status.zerodha_configured;
+  var zConn=status&&status.zerodha_connected;
+  var zUser=status&&status.zerodha_user;
+  var connectZerodha=function(){window.location.href=API+'/api/zerodha/login'};
+  var disconnectZerodha=function(){
+    fetch(API+'/api/zerodha/logout',{method:'POST'}).then(function(){setZerodhaHoldings(null);fetchAll()});
+  };
+  var fetchZerodhaHoldings=function(){
+    setZerodhaLoading(true);setZerodhaError(null);
+    fetch(API+'/api/zerodha/holdings').then(function(r){return r.json()}).then(function(d){
+      if(d.error){setZerodhaError(d.error);if(d.expired)disconnectZerodha();}
+      else setZerodhaHoldings(d);
+    }).catch(function(e){setZerodhaError('Network error')}).finally(function(){setZerodhaLoading(false)});
+  };
+  // Auto-fetch holdings when Zerodha is connected and portfolio tab is active
+  useEffect(function(){
+    if(zConn&&tab==='zport'&&!zerodhaHoldings&&!zerodhaLoading)fetchZerodhaHoldings();
+  },[zConn,tab]);
 
   var allStocks=(data&&data.all_stocks)||[];
   var nT=allStocks.length||((data&&data.total_scanned)||0);
@@ -462,6 +485,10 @@ function App(){
         {isSc?<button className="btn btn-r" onClick={stopScan}>⏹ Stop</button>
         :<button className="btn btn-g" onClick={triggerScan}>▶</button>}
         <button className="btn" onClick={resetAndRescan} style={{background:'rgba(249,115,22,.15)',color:'var(--or)',border:'1px solid rgba(249,115,22,.25)'}}>↻ Reset</button>
+        {zConf && (zConn
+          ?<div className="bdg" style={{background:'rgba(5,150,105,.08)',border:'1px solid rgba(5,150,105,.2)',cursor:'pointer'}} onClick={disconnectZerodha}><div className="dot on"/>{'Zerodha: '+(zUser||'✓')}</div>
+          :<button className="btn" onClick={connectZerodha} style={{background:'rgba(232,68,68,.1)',color:'#e84444',border:'1px solid rgba(232,68,68,.25)',fontWeight:700}}>🔗 Connect Zerodha</button>
+        )}
       </div>
     </div></header>
     <main className="mn">
@@ -470,7 +497,7 @@ function App(){
       <div className="sts">
         <div className="st"><div className="stl">NIFTY 500</div><div className="stv" style={{color:'var(--bl)'}}>{nT}</div><div className="sts2">{(progress&&progress.skipped||0)+' skipped'}</div></div>
         <div className="st"><div className="stl">Buy Signals</div><div className="stv" style={{color:'var(--gn)'}}>{nB}</div><div className="sts2">{'≥60 pts'}</div></div>
-        <div className="st"><div className="stl">Sell</div><div className="stv" style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">{'≥3/6'}</div></div>
+        <div className="st"><div className="stl">Sell</div><div className="stv" style={{color:'var(--rd)'}}>{nS}</div><div className="sts2">{'≥3/7'}</div></div>
         <div className="st"><div className="stl">Portfolio</div><div className="stv" style={{color:'var(--pu)'}}>{nP}</div></div>
       </div>
 
@@ -511,6 +538,7 @@ function App(){
         <button className={'tab '+(tab==='buy'?'a':'')} onClick={function(){setTab('buy')}}>Buy<span className="tc tcg">{filteredCounts.buy}</span></button>
         <button className={'tab '+(tab==='sell'?'a':'')} onClick={function(){setTab('sell')}}>Sell<span className="tc tcr">{filteredCounts.sell}</span></button>
         <button className={'tab '+(tab==='port'?'a':'')} onClick={function(){setTab('port')}}>Portfolio<span className="tc tcb">{filteredCounts.port}</span></button>
+        {zConn && <button className={'tab '+(tab==='zport'?'a':'')} onClick={function(){setTab('zport')}} style={tab==='zport'?{background:'rgba(232,68,68,.12)'}:{}}>{'💰 Zerodha'}<span className="tc" style={{background:'rgba(232,68,68,.08)',color:'#e84444'}}>{zerodhaHoldings?zerodhaHoldings.holdings.length:'?'}</span></button>}
       </div>
 
       <div className="srch"><input placeholder="Search stock..." value={search} onChange={function(e){setSearch(e.target.value)}}/></div>
@@ -548,7 +576,49 @@ function App(){
         </div>
       </div>}
 
-      <div className="tc2">
+      {/* Zerodha Portfolio Tab */}
+      {tab==='zport'?<div>
+        {zerodhaLoading&&<div className="ld"><div className="sp"/>Loading Zerodha holdings...</div>}
+        {zerodhaError&&<div style={{padding:'12px',background:'var(--rg)',borderRadius:'8px',fontSize:'12px',color:'var(--rd)',marginBottom:'12px'}}>{zerodhaError}<button className="btn btn-sm" onClick={connectZerodha} style={{marginLeft:'8px'}}>Reconnect</button></div>}
+        {zerodhaHoldings&&<div>
+          {/* Portfolio Summary Cards */}
+          <div className="sts" style={{gridTemplateColumns:'repeat(6,1fr)',marginBottom:'14px'}}>
+            <div className="st"><div className="stl">Holdings</div><div className="stv" style={{color:'var(--bl)'}}>{zerodhaHoldings.summary.total_stocks}</div><div className="sts2">{zerodhaHoldings.summary.with_scan_data+' with signals'}</div></div>
+            <div className="st"><div className="stl">Invested</div><div className="stv" style={{fontSize:'16px',color:'var(--t1)'}}>{'₹'+fmtVol(zerodhaHoldings.summary.total_invested)}</div></div>
+            <div className="st"><div className="stl">Current</div><div className="stv" style={{fontSize:'16px',color:'var(--t1)'}}>{'₹'+fmtVol(zerodhaHoldings.summary.total_current)}</div></div>
+            <div className="st"><div className="stl">Total P&L</div><div className="stv" style={{fontSize:'16px',color:zerodhaHoldings.summary.total_pnl>=0?'var(--gn)':'var(--rd)'}}>{(zerodhaHoldings.summary.total_pnl>=0?'+':'')+'₹'+fmtVol(Math.abs(zerodhaHoldings.summary.total_pnl))}</div><div className="sts2">{zerodhaHoldings.summary.total_return_pct.toFixed(1)+'%'}</div></div>
+            <div className="st"><div className="stl">Day P&L</div><div className="stv" style={{fontSize:'16px',color:zerodhaHoldings.summary.day_pnl>=0?'var(--gn)':'var(--rd)'}}>{(zerodhaHoldings.summary.day_pnl>=0?'+':'')+'₹'+fmtVol(Math.abs(zerodhaHoldings.summary.day_pnl))}</div></div>
+            <div className="st"><div className="stl">Sell Alerts</div><div className="stv" style={{color:zerodhaHoldings.summary.sell_alerts>0?'var(--rd)':'var(--gn)'}}>{zerodhaHoldings.summary.sell_alerts}</div><div className="sts2">{'≥3/7 conditions'}</div></div>
+          </div>
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'8px'}}><button className="btn btn-sm btn-pu" onClick={fetchZerodhaHoldings}>↻ Refresh Holdings</button></div>
+          {/* Holdings Table */}
+          <div className="tc2"><div className="ts"><table>
+            <thead><tr>
+              <th>Stock</th><th>Qty</th><th>Avg Price</th><th>LTP</th><th>P&L</th><th>Return</th>
+              <th>Buy Score</th><th>Sell</th><th>MACD</th><th>Signal</th>
+            </tr></thead>
+            <tbody>{zerodhaHoldings.holdings.map(function(h){
+              var sc=h.scan;
+              var pnlColor=h.pnl>=0?'var(--gn)':'var(--rd)';
+              return <tr key={h.tradingsymbol} onClick={function(){if(sc)setSel(sc)}} style={{cursor:sc?'pointer':'default'}}>
+                <td><div className="sn"><span className="sns">{h.tradingsymbol}</span>{!sc&&<span style={{display:'inline-block',padding:'1px 5px',borderRadius:'3px',fontSize:'8px',fontWeight:600,background:'rgba(148,163,184,.1)',color:'var(--t3)',marginLeft:'4px'}}>no scan</span>}<br/><span className="snn">{h.exchange}{h.day_change_pct!==0&&<span style={{color:h.day_change_pct>=0?'var(--gn)':'var(--rd)',marginLeft:'4px'}}>{(h.day_change_pct>=0?'+':'')+h.day_change_pct.toFixed(1)+'% today'}</span>}</span></div></td>
+                <td style={{fontWeight:600}}>{h.quantity}</td>
+                <td>{'₹'+fmt(h.avg_price)}</td>
+                <td style={{fontWeight:600}}>{'₹'+fmt(h.ltp)}</td>
+                <td style={{color:pnlColor,fontWeight:700}}>{(h.pnl>=0?'+':'')+'₹'+fmtVol(Math.abs(h.pnl))}</td>
+                <td><span style={{padding:'3px 8px',borderRadius:'4px',fontSize:'10px',fontWeight:700,background:h.total_return_pct>=0?'var(--gg)':'var(--rg)',color:h.total_return_pct>=0?'var(--gn)':'var(--rd)'}}>{(h.total_return_pct>=0?'+':'')+h.total_return_pct.toFixed(1)+'%'}</span></td>
+                <td>{sc?<span className={'score score-buy '+(sc.buy_score>=75?'strong':'')}>{sc.buy_score}</span>:<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>}</td>
+                <td>{sc?<span className="score score-sell">{sc.sell_count}</span>:<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>}</td>
+                <td>{sc?<MACDSlope slope={sc.macd_slope} phase={sc.macd_phase} curve={sc.macd_curve} zeroY={sc.macd_zero_y} macdVal={sc.macd}/>:<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>}</td>
+                <td>{sc?(sc.is_sell?<span className="sig sig-s">⚠ SELL</span>:sc.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:sc.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:<span className="sig sig-h">HOLD</span>):<span className="sig sig-h">N/A</span>}</td>
+              </tr>})}</tbody>
+          </table></div></div>
+        </div>}
+        {!zerodhaHoldings&&!zerodhaLoading&&!zerodhaError&&<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>💰</div><div style={{fontSize:'13px'}}>Click the button above to load your Zerodha holdings.</div><button className="btn btn-g" onClick={fetchZerodhaHoldings} style={{marginTop:'12px'}}>Load Holdings</button></div>}
+      </div>
+
+      /* Main Stock Table (all other tabs) */
+      :<div className="tc2">
         {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>{activeWL?'📋':'📊'}</div><div style={{fontSize:'13px'}}>{activeWL?'"'+activeWL+'" is empty.':search?'No match for "'+search+'"':isSc?'Stocks loading...':'No stocks yet.'}</div></div>
         :<div className="ts"><table>
           <thead><tr>
@@ -578,7 +648,7 @@ function App(){
             <td>{goldenMatch(s)?<span className="sig" style={{background:'rgba(217,119,6,.12)',color:'#b45309',border:'1px solid rgba(217,119,6,.3)',fontWeight:800}}>{'★ GOLDEN'}</span>:s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.is_sell&&s.in_portfolio?<span className="sig sig-s">SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
           </tr>})}</tbody>
         </table></div>}
-      </div>
+      </div>}
     </main>
     {sel && <Modal s={sel} onClose={function(){setSel(null)}} watchlists={watchlists} onAddToWL={toggleInWL} isGolden={goldenMatch(sel)}/>}
   </div>;
