@@ -385,8 +385,7 @@ function App(){
   var [zTokenBusy,setZTokenBusy]=useState(false);
   var [zShowLogin,setZShowLogin]=useState(false);
   var openZerodhaLogin=function(){
-    if(zLoginUrl)window.open(zLoginUrl,'_blank');
-    setZShowLogin(true);
+    setZShowLogin(true);setZerodhaError(null);
   };
   var submitRequestToken=function(){
     // Extract request_token from either a full URL or raw token string
@@ -516,28 +515,39 @@ function App(){
 
       {/* Zerodha token paste banner */}
       {zShowLogin && !zConn && <div style={{padding:'14px 18px',background:'linear-gradient(135deg,rgba(232,68,68,.06),rgba(232,68,68,.02))',border:'1px solid rgba(232,68,68,.15)',borderRadius:'10px',marginBottom:'12px'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'8px'}}>
-          <span style={{fontSize:'12px',fontWeight:700,color:'#e84444'}}>🔗 Connect Zerodha — Step 2</span>
-          <button onClick={function(){setZShowLogin(false)}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--t3)',fontSize:'14px'}}>✕</button>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
+          <span style={{fontSize:'13px',fontWeight:700,color:'#e84444'}}>🔗 Connect Zerodha</span>
+          <button onClick={function(){setZShowLogin(false)}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--t3)',fontSize:'16px'}}>✕</button>
         </div>
-        <div style={{fontSize:'11px',color:'var(--t2)',marginBottom:'10px',lineHeight:'1.5'}}>
-          {'A Zerodha login tab should have opened. After logging in, you\'ll be redirected to a URL like:'}<br/>
-          <code style={{fontSize:'10px',background:'var(--bg2)',padding:'2px 6px',borderRadius:'4px'}}>{'http://localhost:8503/?...&request_token=XXXXX'}</code><br/>
-          {'Paste the full URL or just the request_token below:'}
+
+        <div style={{display:'flex',gap:'16px',marginBottom:'12px'}}>
+          <div style={{flex:1,padding:'12px',background:'var(--bg1)',borderRadius:'8px',border:'1px solid var(--bd)'}}>
+            <div style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',marginBottom:'6px',letterSpacing:'.5px'}}>STEP 1 — Login to Zerodha</div>
+            <div style={{fontSize:'11px',color:'var(--t2)',marginBottom:'8px'}}>Click the link below to login. After login you will land on a page with a URL containing your request token.</div>
+            {zLoginUrl
+              ?<a href={zLoginUrl} target="_blank" rel="noopener noreferrer" style={{display:'inline-block',padding:'6px 14px',background:'#e84444',color:'#fff',borderRadius:'6px',fontSize:'11px',fontWeight:700,textDecoration:'none'}}>Open Zerodha Login ↗</a>
+              :<span style={{fontSize:'11px',color:'var(--rd)'}}>ZERODHA_API_KEY not configured</span>
+            }
+          </div>
+          <div style={{flex:1,padding:'12px',background:'var(--bg1)',borderRadius:'8px',border:'1px solid var(--bd)'}}>
+            <div style={{fontSize:'10px',fontWeight:700,color:'var(--t3)',marginBottom:'6px',letterSpacing:'.5px'}}>STEP 2 — Paste the token</div>
+            <div style={{fontSize:'11px',color:'var(--t2)',marginBottom:'8px'}}>Copy the full redirect URL or just the <code style={{fontSize:'10px',background:'var(--bg2)',padding:'1px 4px',borderRadius:'3px'}}>request_token</code> value from the URL bar.</div>
+          </div>
         </div>
+
         <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
           <input
             value={zTokenInput}
             onChange={function(e){setZTokenInput(e.target.value)}}
             onKeyDown={function(e){if(e.key==='Enter')submitRequestToken()}}
-            placeholder="Paste URL or request_token here..."
-            style={{flex:1,padding:'8px 12px',borderRadius:'6px',border:'1px solid var(--bd)',fontSize:'12px',fontFamily:"'JetBrains Mono',monospace",background:'var(--bg1)',color:'var(--t1)'}}
+            placeholder="Paste full URL or request_token here..."
+            style={{flex:1,padding:'9px 12px',borderRadius:'6px',border:'1px solid var(--bd)',fontSize:'12px',fontFamily:"'JetBrains Mono',monospace",background:'var(--bg1)',color:'var(--t1)'}}
           />
-          <button className="btn btn-g" onClick={submitRequestToken} disabled={zTokenBusy||!zTokenInput.trim()} style={{opacity:zTokenBusy?.5:1}}>
+          <button className="btn btn-g" onClick={submitRequestToken} disabled={zTokenBusy||!zTokenInput.trim()} style={{opacity:zTokenBusy?.5:1,minWidth:'100px'}}>
             {zTokenBusy?'Connecting...':'Connect'}
           </button>
         </div>
-        {zerodhaError && <div style={{marginTop:'6px',fontSize:'10px',color:'var(--rd)'}}>{zerodhaError}</div>}
+        {zerodhaError && <div style={{marginTop:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600}}>{zerodhaError}</div>}
       </div>}
 
       <div className="sts">
