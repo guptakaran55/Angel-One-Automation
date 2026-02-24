@@ -380,9 +380,29 @@ function App(){
   var zConf=status&&status.zerodha_configured;
   var zConn=status&&status.zerodha_connected;
   var zUser=status&&status.zerodha_user;
-  var connectZerodha=function(){window.location.href=API+'/api/zerodha/login'};
+  var zLoginUrl=status&&status.login_url;
+  var [zTokenInput,setZTokenInput]=useState('');
+  var [zTokenBusy,setZTokenBusy]=useState(false);
+  var [zShowLogin,setZShowLogin]=useState(false);
+  var openZerodhaLogin=function(){
+    if(zLoginUrl)window.open(zLoginUrl,'_blank');
+    setZShowLogin(true);
+  };
+  var submitRequestToken=function(){
+    // Extract request_token from either a full URL or raw token string
+    var token=zTokenInput.trim();
+    if(!token)return;
+    var match=token.match(/request_token=([^&]+)/);
+    if(match)token=match[1];
+    setZTokenBusy(true);setZerodhaError(null);
+    fetch(API+'/api/zerodha/exchange_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_token:token})})
+      .then(function(r){return r.json()}).then(function(d){
+        if(d.error){setZerodhaError(d.error)}
+        else{setZShowLogin(false);setZTokenInput('');fetchAll()}
+      }).catch(function(){setZerodhaError('Network error')}).finally(function(){setZTokenBusy(false)});
+  };
   var disconnectZerodha=function(){
-    fetch(API+'/api/zerodha/logout',{method:'POST'}).then(function(){setZerodhaHoldings(null);fetchAll()});
+    fetch(API+'/api/zerodha/logout',{method:'POST'}).then(function(){setZerodhaHoldings(null);setZShowLogin(false);fetchAll()});
   };
   var fetchZerodhaHoldings=function(){
     setZerodhaLoading(true);setZerodhaError(null);
@@ -487,12 +507,38 @@ function App(){
         <button className="btn" onClick={resetAndRescan} style={{background:'rgba(249,115,22,.15)',color:'var(--or)',border:'1px solid rgba(249,115,22,.25)'}}>↻ Reset</button>
         {zConf && (zConn
           ?<div className="bdg" style={{background:'rgba(5,150,105,.08)',border:'1px solid rgba(5,150,105,.2)',cursor:'pointer'}} onClick={disconnectZerodha}><div className="dot on"/>{'Zerodha: '+(zUser||'✓')}</div>
-          :<button className="btn" onClick={connectZerodha} style={{background:'rgba(232,68,68,.1)',color:'#e84444',border:'1px solid rgba(232,68,68,.25)',fontWeight:700}}>🔗 Connect Zerodha</button>
+          :<button className="btn" onClick={openZerodhaLogin} style={{background:'rgba(232,68,68,.1)',color:'#e84444',border:'1px solid rgba(232,68,68,.25)',fontWeight:700}}>🔗 Connect Zerodha</button>
         )}
       </div>
     </div></header>
     <main className="mn">
       {scanError && <div style={{padding:'8px 14px',background:'var(--rg)',borderRadius:'8px',fontSize:'11px',color:'var(--rd)',fontWeight:600,marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>{scanError}</span><button className="btn btn-sm" onClick={reconnect} style={{background:'var(--am)',border:'none',color:'#000'}}>🔌 Reconnect</button></div>}
+
+      {/* Zerodha token paste banner */}
+      {zShowLogin && !zConn && <div style={{padding:'14px 18px',background:'linear-gradient(135deg,rgba(232,68,68,.06),rgba(232,68,68,.02))',border:'1px solid rgba(232,68,68,.15)',borderRadius:'10px',marginBottom:'12px'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'8px'}}>
+          <span style={{fontSize:'12px',fontWeight:700,color:'#e84444'}}>🔗 Connect Zerodha — Step 2</span>
+          <button onClick={function(){setZShowLogin(false)}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--t3)',fontSize:'14px'}}>✕</button>
+        </div>
+        <div style={{fontSize:'11px',color:'var(--t2)',marginBottom:'10px',lineHeight:'1.5'}}>
+          {'A Zerodha login tab should have opened. After logging in, you\'ll be redirected to a URL like:'}<br/>
+          <code style={{fontSize:'10px',background:'var(--bg2)',padding:'2px 6px',borderRadius:'4px'}}>{'http://localhost:8503/?...&request_token=XXXXX'}</code><br/>
+          {'Paste the full URL or just the request_token below:'}
+        </div>
+        <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+          <input
+            value={zTokenInput}
+            onChange={function(e){setZTokenInput(e.target.value)}}
+            onKeyDown={function(e){if(e.key==='Enter')submitRequestToken()}}
+            placeholder="Paste URL or request_token here..."
+            style={{flex:1,padding:'8px 12px',borderRadius:'6px',border:'1px solid var(--bd)',fontSize:'12px',fontFamily:"'JetBrains Mono',monospace",background:'var(--bg1)',color:'var(--t1)'}}
+          />
+          <button className="btn btn-g" onClick={submitRequestToken} disabled={zTokenBusy||!zTokenInput.trim()} style={{opacity:zTokenBusy?.5:1}}>
+            {zTokenBusy?'Connecting...':'Connect'}
+          </button>
+        </div>
+        {zerodhaError && <div style={{marginTop:'6px',fontSize:'10px',color:'var(--rd)'}}>{zerodhaError}</div>}
+      </div>}
 
       <div className="sts">
         <div className="st"><div className="stl">NIFTY 500</div><div className="stv" style={{color:'var(--bl)'}}>{nT}</div><div className="sts2">{(progress&&progress.skipped||0)+' skipped'}</div></div>
@@ -579,7 +625,7 @@ function App(){
       {/* Zerodha Portfolio Tab */}
       {tab==='zport'?<div>
         {zerodhaLoading&&<div className="ld"><div className="sp"/>Loading Zerodha holdings...</div>}
-        {zerodhaError&&<div style={{padding:'12px',background:'var(--rg)',borderRadius:'8px',fontSize:'12px',color:'var(--rd)',marginBottom:'12px'}}>{zerodhaError}<button className="btn btn-sm" onClick={connectZerodha} style={{marginLeft:'8px'}}>Reconnect</button></div>}
+        {zerodhaError&&<div style={{padding:'12px',background:'var(--rg)',borderRadius:'8px',fontSize:'12px',color:'var(--rd)',marginBottom:'12px'}}>{zerodhaError}<button className="btn btn-sm" onClick={openZerodhaLogin} style={{marginLeft:'8px'}}>Reconnect</button></div>}
         {zerodhaHoldings&&<div>
           {/* Portfolio Summary Cards */}
           <div className="sts" style={{gridTemplateColumns:'repeat(6,1fr)',marginBottom:'14px'}}>
