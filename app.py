@@ -16,7 +16,7 @@ v3.1 Changes:
   - Backend watchlist routes removed (frontend localStorage is canonical)
 """
 
-import os, time, threading, logging, hashlib
+import os, time, threading, logging, hashlib, json
 from datetime import datetime, timedelta
 from collections import defaultdict
 import numpy as np, pandas as pd, pyotp, requests
@@ -39,6 +39,11 @@ SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
 # Volume filter: minimum 20-day average volume to analyze a stock
 MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
+
+# ── App Access Password ──
+# Change this string to update the password. Users must enter it once per session.
+# You can also set it via env var APP_PASSWORD to avoid editing code.
+APP_PASSWORD = os.getenv("APP_PASSWORD", "signal2026")  # ← CHANGE THIS
 
 # Zerodha Kite Connect (for portfolio only — scan still uses Angel One)
 ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
@@ -147,9 +152,33 @@ def fetch_instrument_list():
         SCAN_UNIVERSE = get_scan_universe()
 
         url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        logger.info("Downloading Angel One instrument list...")
-        resp = requests.get(url, timeout=120)
-        all_inst = resp.json()
+        all_inst = None
+
+        # Retry up to 3 times with increasing timeout
+        for attempt in range(1, 4):
+            try:
+                logger.info(f"Downloading Angel One instrument list (attempt {attempt}/3)...")
+                resp = requests.get(url, timeout=(15, 180), stream=True)  # (connect, read) timeouts
+                resp.raise_for_status()
+                # Read in chunks to avoid socket stalls
+                chunks = []
+                for chunk in resp.iter_content(chunk_size=1024*256):
+                    if chunk:
+                        chunks.append(chunk)
+                raw = b"".join(chunks)
+                all_inst = json.loads(raw)
+                logger.info(f"Downloaded {len(raw)/1024/1024:.1f} MB, {len(all_inst)} instruments")
+                break
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                logger.warning(f"Attempt {attempt} failed: {e}")
+                if attempt < 3:
+                    time.sleep(5 * attempt)
+                else:
+                    raise
+
+        if not all_inst:
+            logger.error("Could not download instrument list after 3 attempts")
+            return False
 
         # All NSE equities
         instrument_list = [
@@ -894,6 +923,24 @@ def scheduler():
 # ═══════════════════════════════════════════════════════════════
 # ROUTES
 # ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/auth", methods=["POST"])
+def api_auth():
+    """Verify app access password."""
+    body = request.get_json() or {}
+    pwd = body.get("password", "").strip()
+    if pwd == APP_PASSWORD:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Incorrect password"}), 401
+
+@app.route("/api/docs")
+def api_docs():
+    """Serve INDICATORS.md content for in-app documentation."""
+    doc_path = os.path.join(os.path.dirname(__file__), "INDICATORS.md")
+    if os.path.exists(doc_path):
+        with open(doc_path, "r", encoding="utf-8") as f:
+            return jsonify({"content": f.read()})
+    return jsonify({"content": "# Documentation\n\nINDICATORS.md not found."})
 
 @app.route("/api/status")
 def api_status():
