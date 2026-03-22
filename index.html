@@ -457,6 +457,56 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
           </div>
         </div>
       </div>}
+      {/* MACD Momentum Analysis */}
+      {(function(){
+        var cv=s.macd_curve||[];
+        var zy=typeof s.macd_zero_y==='number'?s.macd_zero_y:0.5;
+        var macdChart=null;
+        if(cv.length>2){
+          var W=260,MH=50;
+          var pts=cv.map(function(v,i){return (i/(cv.length-1))*W+','+(MH-v*MH)});
+          var pd='M'+pts.join(' L');
+          var zly=MH-zy*MH;
+          macdChart=<svg width="100%" height="50" viewBox={'0 0 '+W+' '+MH} preserveAspectRatio="none" style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.03)'}}>
+            <line x1="0" y1={zly} x2={W} y2={zly} stroke="#dc2626" strokeWidth="2" strokeDasharray="4,3" opacity="0.6"/>
+            <text x="3" y={Math.max(8,zly-3)} fill="var(--t3)" fontSize="6">0</text>
+            <path d={pd} fill="none" stroke={pc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <circle cx={W} cy={MH-(cv[cv.length-1]||0)*MH} r="3" fill={pc}/>
+          </svg>;
+        }
+        return <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'6px'}}>MACD MOMENTUM ANALYSIS</div>
+          {macdChart}
+          <div style={{display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
+            <div style={{padding:'6px 14px',background:pc+'18',borderRadius:'6px',border:'1px solid '+pc+'40'}}>
+              <div style={{fontSize:'14px',fontWeight:800,color:pc}}>{s.macd_phase||'—'}</div>
+            </div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>d(MACD)/dt</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_slope>0?'var(--gn)':s.macd_slope<0?'var(--rd)':'var(--t3)'}}>{s.macd_slope!=null?(s.macd_slope>0?'+':'')+s.macd_slope.toFixed(4):'—'}</div></div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d\u00B2(MACD)/dt\u00B2'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.macd_accel>0?'var(--gn)':s.macd_accel<0?'var(--rd)':'var(--t3)'}}>{s.macd_accel!=null?(s.macd_accel>0?'+':'')+s.macd_accel.toFixed(4):'—'}</div></div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>MACD %ile (1Y)</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:typeof s.macd_pctl==='number'?(s.macd_pctl<=25?'var(--gn)':s.macd_pctl>=75?'var(--rd)':'var(--t2)'):'var(--t3)'}}>{typeof s.macd_pctl==='number'?s.macd_pctl.toFixed(0)+'%':'—'}</div></div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>MACD % of 1Y low</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:typeof s.macd_low_pct==='number'?(s.macd_low_pct>=60?'var(--rd)':'var(--t2)'):'var(--t3)'}}>{typeof s.macd_low_pct==='number'?s.macd_low_pct.toFixed(0)+'%':'—'}</div><div style={{fontSize:'7px',color:'var(--t3)'}}>{typeof s.macd_1y_low==='number'?'1Y low: '+s.macd_1y_low.toFixed(1):''}</div></div>
+            <div><div style={{fontSize:'8px',color:'var(--t3)'}}>{'d(SMA)/dt'}</div><div style={{fontSize:'14px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.sma200_slope>0?'var(--gn)':s.sma200_slope<0?'var(--rd)':'var(--t3)'}}>{typeof s.sma200_slope==='number'?(s.sma200_slope>0?'+':'')+s.sma200_slope.toFixed(3):'—'}</div></div>
+          </div>
+          <div style={{fontSize:'8px',color:'var(--t3)',marginTop:'6px',lineHeight:'1.4'}}>
+            {s.macd_phase==='BUY FLIP'&&'Slope just crossed zero upward — momentum confirmed bullish'}
+            {s.macd_phase==='EARLY BUY'&&'Decline decelerating — potential bottom forming'}
+            {s.macd_phase==='SELL FLIP'&&'Slope just crossed zero downward — momentum confirmed bearish'}
+            {s.macd_phase==='EARLY SELL'&&'Rise decelerating — potential top forming'}
+            {s.macd_phase==='BULLISH'&&'Rising momentum with positive acceleration'}
+            {s.macd_phase==='BEARISH'&&'Falling momentum with negative acceleration'}
+          </div>
+        </div>;
+      })()}
+      {/* Price Dynamics */}
+      <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px',marginBottom:'8px'}}>PRICE DYNAMICS</div>
+        <div style={{display:'flex',gap:'16px',flexWrap:'wrap'}}>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Daily velocity</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_vel>0?'var(--gn)':s.price_vel<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_vel==='number'?(s.price_vel>0?'+':'')+s.price_vel.toFixed(2)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Acceleration</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_accel>0?'var(--gn)':s.price_accel<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_accel==='number'?(s.price_accel>0?'+':'')+s.price_accel.toFixed(3)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>3-day ROC</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:s.price_roc3>0?'var(--gn)':s.price_roc3<0?'var(--rd)':'var(--t3)'}}>{typeof s.price_roc3==='number'?(s.price_roc3>0?'+':'')+s.price_roc3.toFixed(2)+'%':'—'}</div></div>
+          <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Up streak</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:(s.up_days||0)>=3?'var(--gn)':'var(--t2)'}}>{(s.up_days||0)+' days'}</div></div>
+        </div>
+      </div>
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
       <div className="ig" style={{marginBottom:'16px'}}>{indicators.map(function(k){var b=bb[k];if(!b)return null;var pct=b.max>0?(b.pts/b.max*100):0;
         return <div className="ic" key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={'ics '+(b.pass?'p':'f')}>{b.pts+'/'+b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f" style={{width:pct+'%',background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
@@ -747,7 +797,7 @@ function App(){
           ?<div className="bdg" style={{background:'rgba(5,150,105,.08)',border:'1px solid rgba(5,150,105,.2)',cursor:'pointer'}} onClick={disconnectZerodha}><div className="dot on"/>{'Zerodha: '+(zUser||'✓')}</div>
           :<button className="btn" onClick={openZerodhaLogin} style={{background:'rgba(232,68,68,.1)',color:'#e84444',border:'1px solid rgba(232,68,68,.25)',fontWeight:700}}>🔗 Zerodha</button>
         )}
-        <button className="btn" onClick={function(){window.open('https://drive.google.com/file/d/1qm8j_ujQkBIQzlV6DhO93q32BgyhgZoX/view?usp=sharing','_blank')}} style={{background:'rgba(99,102,241,.08)',color:'#6366f1',border:'1px solid rgba(99,102,241,.2)'}}>📖</button>
+        <button className="btn" onClick={function(){window.open('__GOOGLE_DRIVE_PDF_LINK__','_blank')}} style={{background:'rgba(99,102,241,.08)',color:'#6366f1',border:'1px solid rgba(99,102,241,.2)'}}>📖</button>
       </div>
     </div></header>
 

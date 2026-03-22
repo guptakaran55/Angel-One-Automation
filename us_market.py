@@ -41,8 +41,14 @@ def fetch_us_candle_data(symbol, period="2y"):
     """
     try:
         import yfinance as yf
+        import requests as _req
 
-        ticker = yf.Ticker(symbol)
+        session = _req.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0",
+        })
+
+        ticker = yf.Ticker(symbol, session=session)
         df = ticker.history(period=period, interval="1d", auto_adjust=True)
 
         if df is None or len(df) < 10:
@@ -102,7 +108,14 @@ def fetch_index_chart_data(index_symbol="^NSEI", resolution="1d", period="1y"):
         elif interval == "1mo" and period not in ["1y", "2y", "5y"]:
             period = "5y"
 
-        ticker = yf.Ticker(index_symbol)
+        # Set custom headers to avoid Yahoo blocking server IPs
+        import requests as _req
+        session = _req.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0",
+        })
+
+        ticker = yf.Ticker(index_symbol, session=session)
         df = ticker.history(period=period, interval=interval, auto_adjust=True)
 
         if df is None or len(df) < 2:

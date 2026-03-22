@@ -1063,14 +1063,20 @@ def api_index_chart():
     index_symbol = request.args.get("index", "^NSEI")
     resolution = request.args.get("resolution", "1d")
     period = request.args.get("period", "1y")
-    try:
-        data = fetch_index_chart_data(index_symbol, resolution, period)
-        if data is None:
-            return jsonify({"error": "Could not fetch index data"}), 500
-        return jsonify(data)
-    except Exception as e:
-        logger.error(f"Index chart error: {e}")
-        return jsonify({"error": str(e)}), 500
+    # Retry up to 2 times — Render's outbound connections can be flaky on first attempt
+    for attempt in range(2):
+        try:
+            data = fetch_index_chart_data(index_symbol, resolution, period)
+            if data is not None:
+                return jsonify(data)
+            if attempt == 0:
+                logger.warning(f"Index chart attempt 1 failed for {index_symbol}, retrying...")
+                time.sleep(1)
+        except Exception as e:
+            logger.error(f"Index chart error (attempt {attempt+1}): {e}")
+            if attempt == 0:
+                time.sleep(1)
+    return jsonify({"error": "Could not fetch index data. Yahoo Finance may be temporarily unavailable."}), 500
 
 SECTOR_INDICES = [
     {"symbol": "^CNXBANK", "name": "NIFTY Bank", "sector": "Banking"},
