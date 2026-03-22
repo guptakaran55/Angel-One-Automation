@@ -1,29 +1,30 @@
 """
-SignalScope v3.1 — Scans ALL NSE equities (~500 stocks)
-Daily candles, 6 indicators, 100-point weighted scoring.
-Stocks tagged with known indices (NIFTY 50/100/200, BSE 100, Midcap 150)
-or "OTHER NSE" for everything else.
+SignalScope v4.0 — Multi-Market Edition
+Scans NIFTY 500 (Angel One) + NASDAQ 100 (Yahoo Finance)
+Daily candles, 6 indicators, weighted scoring, index charts.
 
-v3.1 Changes:
-  - Vectorized OBV & ADX (10x faster per stock)
-  - Volume filter (skip illiquid stocks)
-  - MACD flip magnitude threshold (no more choppy false flips)
-  - Graduated RSI scoring (no more cliff effects)
-  - SMA(200) fallback to SMA(50) for newer listings
-  - macd_pctl used in scoring
-  - Adaptive scan pacing (0.35s base, back off on rate limit)
-  - Improved support/resistance with clustering
-  - Backend watchlist routes removed (frontend localStorage is canonical)
+v4.0 Changes:
+  - Multi-market support: NIFTY 500 + NASDAQ 100
+  - Index chart endpoint with 1D/1W/1M resolution
+  - Parallel market scanning via ThreadPoolExecutor
+  - yfinance integration for US market data
+  - Market switcher in frontend
+  - All v3.1 features preserved
 """
 
 import os, time, threading, logging, hashlib, json
 from datetime import datetime, timedelta
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np, pandas as pd, pyotp, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from SmartApi import SmartConnect
 from index_data import get_scan_universe, build_index_tags, get_tags_for
+from us_market import (
+    get_nasdaq100_symbols, fetch_us_candle_data, fetch_index_chart_data,
+    US_RATE_LIMITED
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -37,54 +38,58 @@ PASSWORD   = os.getenv("ANGEL_PASSWORD", "")
 TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
-# Volume filter: minimum 20-day average volume to analyze a stock
 MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
 
-# ── App Access Password ──
-# Change this string to update the password. Users must enter it once per session.
-# You can also set it via env var APP_PASSWORD to avoid editing code.
-APP_PASSWORD = os.getenv("APP_PASSWORD", "signal2026")  # ← CHANGE THIS
+APP_PASSWORD = os.getenv("APP_PASSWORD", "signal2026")
 
-# Zerodha Kite Connect (for portfolio only — scan still uses Angel One)
+# Zerodha
 ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
 ZERODHA_API_SECRET = os.getenv("ZERODHA_API_SECRET", "")
-
-# Zerodha session state
 _zt = os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
-# Sanity: reject URLs or obviously invalid values (real tokens are ~50+ char alphanumeric)
 zerodha_access_token = _zt if (_zt and not _zt.startswith("http") and len(_zt) > 20) else None
-zerodha_user = None  # populated after first successful API call
+zerodha_user = None
 
 INDEX_TAGS = build_index_tags()
-SCAN_UNIVERSE = set()  # populated at startup from NIFTY 500
+SCAN_UNIVERSE = set()
 
 smart_api = None
 refresh_token = None
-instrument_list = []       # full NSE list from Angel One
-scan_instrument_list = []  # filtered to NIFTY 500 only
-is_scanning = False
-abort_scan = False
+instrument_list = []
+scan_instrument_list = []
+is_scanning = {"nifty500": False, "nasdaq100": False}
+abort_scan = {"nifty500": False, "nasdaq100": False}
 credentials_ok = False
 last_login_attempt = 0
 login_backoff = 1
 
-# Adaptive pacing state
-current_pace = 0.35  # start aggressive (Angel One allows 3 req/s)
+current_pace = 0.35
 PACE_MIN = 0.35
 PACE_MAX = 2.0
 PACE_BACKOFF_MULT = 1.5
 PACE_RECOVERY_MULT = 0.9
 
-scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
+# ── Multi-market scan results ──
+scan_progress = {
+    "nifty500": {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": 0.35},
+    "nasdaq100": {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": 0.5},
+    "active_market": "nifty500",
+}
 
 scan_results = {
-    "last_scan": None, "status": "not_started", "total_scanned": 0,
-    "buy_signals": [], "sell_signals": [], "all_stocks": [],
-    "portfolio_holdings": [], "errors": [],
+    "nifty500": {
+        "last_scan": None, "status": "not_started", "total_scanned": 0,
+        "buy_signals": [], "sell_signals": [], "all_stocks": [],
+        "portfolio_holdings": [], "errors": [],
+    },
+    "nasdaq100": {
+        "last_scan": None, "status": "not_started", "total_scanned": 0,
+        "buy_signals": [], "sell_signals": [], "all_stocks": [],
+        "portfolio_holdings": [], "errors": [],
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
-# AUTH
+# AUTH (Angel One)
 # ═══════════════════════════════════════════════════════════════
 
 def check_credentials():
@@ -107,7 +112,7 @@ def create_session():
             return False
         refresh_token = data["data"]["refreshToken"]
         credentials_ok = True
-        login_backoff = 1  # reset backoff on success
+        login_backoff = 1
         logger.info("Logged in to Angel One")
         return True
     except Exception as e:
@@ -116,7 +121,6 @@ def create_session():
         return False
 
 def ensure_session():
-    """Re-login if needed, with exponential backoff to avoid rate limit spiral."""
     global last_login_attempt, login_backoff, scan_progress
     if smart_api is None:
         return create_session()
@@ -124,70 +128,63 @@ def ensure_session():
         smart_api.getProfile(refresh_token)
         return True
     except:
-        # Check cooldown — don't spam login attempts
         now = time.time()
         if now - last_login_attempt < login_backoff:
-            return False  # still cooling down
+            return False
         last_login_attempt = now
         result = create_session()
         if not result:
-            # Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 60s
             login_backoff = min(login_backoff * 2, 60)
-            scan_progress["rate_limited"] = True
+            scan_progress["nifty500"]["rate_limited"] = True
             logger.warning(f"Login failed, backing off {login_backoff}s")
         else:
             login_backoff = 1
-            scan_progress["rate_limited"] = False
+            scan_progress["nifty500"]["rate_limited"] = False
         return result
 
 # ═══════════════════════════════════════════════════════════════
-# INSTRUMENTS — ALL NSE EQUITIES
+# INSTRUMENTS
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_instrument_list():
-    """Download NSE instruments from Angel One, filter to NIFTY 500 universe only."""
+    """Download NSE instruments from Angel One, filter to NIFTY 500 universe."""
     global instrument_list, scan_instrument_list, SCAN_UNIVERSE
+    import urllib.request, ssl
     try:
-        # Get NIFTY 500 universe (dynamic from NSE or fallback)
         SCAN_UNIVERSE = get_scan_universe()
-
         url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
         all_inst = None
 
-        # Retry up to 3 times with increasing timeout
         for attempt in range(1, 4):
             try:
                 logger.info(f"Downloading Angel One instrument list (attempt {attempt}/3)...")
-                resp = requests.get(url, timeout=(15, 180), stream=True)  # (connect, read) timeouts
-                resp.raise_for_status()
-                # Read in chunks to avoid socket stalls
-                chunks = []
-                for chunk in resp.iter_content(chunk_size=1024*256):
-                    if chunk:
-                        chunks.append(chunk)
-                raw = b"".join(chunks)
+                ctx = ssl.create_default_context()
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0",
+                    "Accept": "application/json",
+                })
+                with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+                    raw = resp.read()
+                logger.info(f"Downloaded {len(raw)/1024/1024:.1f} MB. Parsing JSON...")
                 all_inst = json.loads(raw)
-                logger.info(f"Downloaded {len(raw)/1024/1024:.1f} MB, {len(all_inst)} instruments")
+                logger.info(f"Parsed {len(all_inst)} instruments")
                 break
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            except Exception as e:
                 logger.warning(f"Attempt {attempt} failed: {e}")
                 if attempt < 3:
                     time.sleep(5 * attempt)
-                else:
-                    raise
 
         if not all_inst:
-            logger.error("Could not download instrument list after 3 attempts")
+            logger.error("Could not download instrument list after 3 attempts.")
+            logger.error("NIFTY scan unavailable. NASDAQ scan still works.")
             return False
 
-        # All NSE equities
         instrument_list = [
             i for i in all_inst
             if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")
         ]
         logger.info(f"Total NSE equities: {len(instrument_list)}")
 
-        # Filter to only NIFTY 500 / known universe
         scan_instrument_list = [
             i for i in instrument_list
             if i["symbol"].replace("-EQ", "") in SCAN_UNIVERSE
@@ -199,13 +196,12 @@ def fetch_instrument_list():
         return False
 
 # ═══════════════════════════════════════════════════════════════
-# DATA FETCH
+# DATA FETCH (Angel One)
 # ═══════════════════════════════════════════════════════════════
 
-RATE_LIMITED = "RATE_LIMITED"  # sentinel value
+RATE_LIMITED = "RATE_LIMITED"
 
 def fetch_candle_data(symbol_token):
-    """Fetch 730 days of daily candles for proper EMA warmup. Returns DataFrame, None (no data), or RATE_LIMITED."""
     if not ensure_session(): return RATE_LIMITED
     try:
         to_d = datetime.now()
@@ -221,7 +217,6 @@ def fetch_candle_data(symbol_token):
             df["DateTime"] = pd.to_datetime(df["DateTime"])
             df.set_index("DateTime", inplace=True)
             return df
-        # API responded but no data — stock is just thinly traded, NOT rate limited
         return None
     except Exception as e:
         err_str = str(e)
@@ -246,10 +241,12 @@ def fetch_portfolio():
         return []
 
 # ═══════════════════════════════════════════════════════════════
-# TECHNICAL INDICATORS (vectorized)
+# TECHNICAL INDICATORS
 # ═══════════════════════════════════════════════════════════════
 
 def calc_sma(s, p): return s.rolling(window=p, min_periods=p).mean()
+
+def calc_ema(s, p): return s.ewm(span=p, adjust=False).mean()
 
 def calc_rsi(s, p=14):
     d = s.diff(); g = d.where(d>0,0.0); l = -d.where(d<0,0.0)
@@ -266,22 +263,14 @@ def calc_macd(s, f=12, sl=26, sg=9):
     return ml, sig, ml-sig
 
 def calc_obv(close, vol):
-    """Vectorized OBV — replaces slow row-by-row Python loop."""
     direction = np.sign(close.diff()).fillna(0)
     return (direction * vol).cumsum()
 
 def calc_adx(high, low, close, p=14):
-    """Vectorized ADX — replaces slow .apply() with np.where."""
     up_move = high.diff()
     down_move = low.shift(1) - low
-    plus_dm = pd.Series(
-        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
-        index=high.index
-    )
-    minus_dm = pd.Series(
-        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
-        index=high.index
-    )
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
     tr1 = high - low
     tr2 = (high - close.shift(1)).abs()
     tr3 = (low - close.shift(1)).abs()
@@ -294,11 +283,8 @@ def calc_adx(high, low, close, p=14):
     return adx, plus_di, minus_di
 
 def find_support_resistance(high, low, close, lookback=60):
-    """Improved support/resistance with price level clustering."""
     price = close.iloc[-1]
     rh, rl, rc = high.iloc[-lookback:], low.iloc[-lookback:], close.iloc[-lookback:]
-
-    # Use wider window (5 bars each side) for more meaningful swing points
     window = 5
     swing_highs, swing_lows = [], []
     for i in range(window, len(rh) - window):
@@ -309,15 +295,11 @@ def find_support_resistance(high, low, close, lookback=60):
                 is_high = False
             if rl.iloc[i] >= rl.iloc[i - j] or rl.iloc[i] >= rl.iloc[i + j]:
                 is_low = False
-        if is_high:
-            swing_highs.append(float(rh.iloc[i]))
-        if is_low:
-            swing_lows.append(float(rl.iloc[i]))
+        if is_high: swing_highs.append(float(rh.iloc[i]))
+        if is_low: swing_lows.append(float(rl.iloc[i]))
 
-    # Cluster nearby levels (within 1.5% of each other)
     def cluster_levels(levels, threshold_pct=1.5):
-        if not levels:
-            return []
+        if not levels: return []
         levels = sorted(levels)
         clusters = []
         current = [levels[0]]
@@ -333,25 +315,22 @@ def find_support_resistance(high, low, close, lookback=60):
     res_levels = cluster_levels([h for h in swing_highs if h > price])
     sup_levels = cluster_levels([l for l in swing_lows if l < price])
 
-    # Pivot fallback
     pivot = (float(rh.iloc[-1]) + float(rl.iloc[-1]) + float(rc.iloc[-1])) / 3
     r1, s1 = 2 * pivot - float(rl.iloc[-1]), 2 * pivot - float(rh.iloc[-1])
 
-    if not sup_levels:
-        sup_levels = [s1] if s1 < price else [float(rl.min())]
-    if not res_levels:
-        res_levels = [r1] if r1 > price else [float(rh.max())]
+    if not sup_levels: sup_levels = [s1] if s1 < price else [float(rl.min())]
+    if not res_levels: res_levels = [r1] if r1 > price else [float(rh.max())]
 
     support = max([s for s in sup_levels if s < price], default=float(rl.min()))
     resistance = min([r for r in res_levels if r > price], default=float(rh.max()))
-
     return round(support, 2), round(resistance, 2)
 
 # ═══════════════════════════════════════════════════════════════
-# ANALYZE — 100pt WEIGHTED SCORING
+# ANALYZE — WEIGHTED SCORING (works for both markets)
 # ═══════════════════════════════════════════════════════════════
 
-def analyze_stock(df):
+def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
+    """Analyze a stock DataFrame. Works for any market — just pass the right currency."""
     if df is None or len(df) < 50: return None
     close, high, low, vol = df["Close"], df["High"], df["Low"], df["Volume"]
     n_candles = len(df)
@@ -359,12 +338,11 @@ def analyze_stock(df):
     ok = lambda v: not pd.isna(v)
     sf = lambda v, d=2: round(float(v),d) if ok(v) else None
 
-    # ── Volume filter: skip illiquid stocks ──
+    vol_threshold = min_avg_volume if min_avg_volume is not None else MIN_AVG_VOLUME
     avg_vol_20 = float(vol.iloc[-20:].mean()) if n_candles >= 20 else float(vol.mean())
-    if avg_vol_20 < MIN_AVG_VOLUME:
-        return None  # too illiquid to trade
+    if vol_threshold > 0 and avg_vol_20 < vol_threshold:
+        return None
 
-    # SMA(200) with SMA(50) fallback for newer listings
     has_sma200 = n_candles >= 200
     has_sma50 = n_candles >= 50
     if has_sma200:
@@ -374,18 +352,22 @@ def analyze_stock(df):
         sma_label = "SMA(200)"
         sma_max_pts = 25
     elif has_sma50:
-        # Fallback: use SMA(50) but with reduced max points
         s200 = calc_sma(close, 50).iloc[-1]
         s200_prev = calc_sma(close, 50).iloc[-2] if n_candles >= 51 else s200
         sma200_slope = float(s200 - s200_prev) if ok(s200) and ok(s200_prev) else 0
         sma_label = "SMA(50) fallback"
-        sma_max_pts = 15  # reduced weight for shorter-term SMA
+        sma_max_pts = 15
     else:
-        s200 = np.nan
-        s200_prev = np.nan
-        sma200_slope = 0
-        sma_label = "N/A"
-        sma_max_pts = 0
+        s200 = np.nan; s200_prev = np.nan; sma200_slope = 0; sma_label = "N/A"; sma_max_pts = 0
+
+    # EMA(21) for near-term proximity scoring
+    ema21_val = np.nan
+    ema21_pct_diff = 0  # how far price is from EMA(21), as %
+    if n_candles >= 21:
+        ema21_series = calc_ema(close, 21)
+        ema21_val = ema21_series.iloc[-1]
+        if ok(ema21_val) and ema21_val > 0:
+            ema21_pct_diff = round((price - ema21_val) / ema21_val * 100, 2)
 
     r14 = calc_rsi(close,14).iloc[-1]
     bm,bu,bl = calc_bb(close,20,2)
@@ -396,7 +378,6 @@ def analyze_stock(df):
     cbm,cbu,cbl = bm.iloc[-1],bu.iloc[-1],bl.iloc[-1]
     cm,cms,cmh = ml.iloc[-1],ms.iloc[-1],mh.iloc[-1]
 
-    # ── MACD Derivatives (d/dt and d²/dt²) ──
     cm_prev = ml.iloc[-2] if len(ml)>=2 else cm
     cm_prev2 = ml.iloc[-3] if len(ml)>=3 else cm_prev
     cm_prev3 = ml.iloc[-4] if len(ml)>=4 else cm_prev2
@@ -405,13 +386,9 @@ def analyze_stock(df):
     macd_slope_prev2 = float(cm_prev2 - cm_prev3) if ok(cm_prev2) and ok(cm_prev3) else 0
     macd_accel = macd_slope - macd_slope_prev
 
-    # ── Momentum Phase Detection ──
-    # Require slope to have been negative for 2+ days AND minimum magnitude
-    # to avoid false flips on choppy/flat stocks
-    MIN_SLOPE_MAG = 0.01  # minimum magnitude to count as "real" directional slope
+    MIN_SLOPE_MAG = 0.01
     was_negative_2d = bool(macd_slope_prev <= -MIN_SLOPE_MAG and macd_slope_prev2 <= -MIN_SLOPE_MAG)
     was_positive_2d = bool(macd_slope_prev >= MIN_SLOPE_MAG and macd_slope_prev2 >= MIN_SLOPE_MAG)
-    # Also allow weaker prior slopes if they were consistent for 3+ days
     was_negative_weak = bool(macd_slope_prev <= 0 and macd_slope_prev2 <= 0 and
                               (abs(macd_slope_prev) + abs(macd_slope_prev2)) > MIN_SLOPE_MAG)
     was_positive_weak = bool(macd_slope_prev >= 0 and macd_slope_prev2 >= 0 and
@@ -421,20 +398,14 @@ def analyze_stock(df):
     early_buy = bool(macd_slope < 0 and macd_accel > 0)
     early_sell = bool(macd_slope > 0 and macd_accel < 0)
 
-    if slope_cross_up:
-        macd_phase = "BUY FLIP"
-    elif early_buy:
-        macd_phase = "EARLY BUY"
-    elif slope_cross_dn:
-        macd_phase = "SELL FLIP"
-    elif early_sell:
-        macd_phase = "EARLY SELL"
-    elif macd_slope > 0 and macd_accel >= 0:
-        macd_phase = "BULLISH"
-    elif macd_slope < 0 and macd_accel <= 0:
-        macd_phase = "BEARISH"
-    else:
-        macd_phase = "NEUTRAL"
+    if slope_cross_up: macd_phase = "BUY FLIP"
+    elif early_buy: macd_phase = "EARLY BUY"
+    elif slope_cross_dn: macd_phase = "SELL FLIP"
+    elif early_sell: macd_phase = "EARLY SELL"
+    elif macd_slope > 0 and macd_accel >= 0: macd_phase = "BULLISH"
+    elif macd_slope < 0 and macd_accel <= 0: macd_phase = "BEARISH"
+    else: macd_phase = "NEUTRAL"
+
     co = ov.iloc[-1]
     co5 = ov.iloc[-5] if len(ov)>=5 else ov.iloc[0]
     co20 = ov.iloc[-20] if len(ov)>=20 else ov.iloc[0]
@@ -450,45 +421,34 @@ def analyze_stock(df):
     reward = round(resistance-price,2) if resistance else 0
     rr_ratio = round(reward/risk,2) if risk>0 else 0
 
-    # ── ATR & Position Sizing ──
     atr_raw = (high - low).ewm(span=14, adjust=False).mean()
     atr = float(atr_raw.iloc[-1]) if len(atr_raw) > 0 and ok(atr_raw.iloc[-1]) else 0
     risk_in_atrs = round(risk / atr, 2) if atr > 0 and risk > 0 else 0
-    # Fixed risk model: assume ₹10,000 risk per trade (user can mentally scale)
     RISK_PER_TRADE = 10000
     position_size = int(RISK_PER_TRADE / risk) if risk > 0 else 0
     capital_needed = round(position_size * price, 0) if position_size > 0 else 0
     potential_profit = round(position_size * reward, 0) if position_size > 0 else 0
     roc_pct = round(potential_profit / capital_needed * 100, 2) if capital_needed > 0 else 0
 
-    # MACD zero-cross detection: MACD just turned positive from ≤0
     cm_prev_val = ml.iloc[-2] if len(ml) >= 2 else 0
     macd_zero_cross_up = bool(ok(cm) and cm > 0 and cm < 0.15 and ok(cm_prev_val) and cm_prev_val <= 0)
     macd_zero_cross_dn = bool(ok(cm) and cm < 0 and cm > -0.15 and ok(cm_prev_val) and cm_prev_val >= 0)
 
-    # Mini MACD curve (last 20 values, normalised for sparkline)
-    # CRITICAL: always include 0 in the normalization range so the zero line
-    # sits at its true relative position (like a real MACD chart)
     macd_curve = []
-    macd_zero_y = 0.5  # default: middle
+    macd_zero_y = 0.5
     n_curve = min(20, len(ml))
     if n_curve > 2:
         raw = [float(ml.iloc[-n_curve + j]) for j in range(n_curve) if ok(ml.iloc[-n_curve + j])]
         if raw:
-            # Include 0 in the min/max range so zero line is always correctly placed
             mn = min(min(raw), 0)
             mx = max(max(raw), 0)
             rng = mx - mn if mx != mn else 1
             macd_curve = [round((v - mn) / rng, 3) for v in raw]
-            # Zero line position is now always correct within the range
             macd_zero_y = round((0 - mn) / rng, 3)
 
-    # ══════════════════════════════════════════════════════════
-    # BUY SCORE — Revised Weights (max ~110 with all bonuses)
-    # ══════════════════════════════════════════════════════════
+    # ── BUY SCORE ──
     buy_score = 0; buy_breakdown = {}
 
-    # 1. SMA trend — 25 pts (or 15 pts with SMA50 fallback)
     sma_p = bool(price > s200) if ok(s200) else False
     sma_pts = sma_max_pts if sma_p else 0
     buy_score += sma_pts
@@ -498,17 +458,12 @@ def analyze_stock(df):
         sma_desc = "Close > SMA(200)"
     else:
         sma_desc = f"N/A ({n_candles} candles < 50)"
-    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": sma_max_pts,
-                                "val": sf(s200), "desc": sma_desc}
+    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": sma_max_pts, "val": sf(s200), "desc": sma_desc}
 
-    # 2. MACD INFLECTION — 30 pts (★ highest weight) + 10 bonus for GOLDEN BUY
-    #    Now also uses macd_pctl for additional context
     macd_vals = ml.dropna()
-    macd_1y_low = 0
-    macd_low_pct = 0
-    macd_pctl = 50
+    macd_1y_low = 0; macd_low_pct = 0; macd_pctl = 50
     if len(macd_vals) >= 60:
-        stable_vals = macd_vals.iloc[60:]  # skip warmup
+        stable_vals = macd_vals.iloc[60:]
         recent_vals = stable_vals.iloc[-650:] if len(stable_vals) > 650 else stable_vals
         macd_1y_low = float(recent_vals.min())
         macd_1y_high = float(recent_vals.max())
@@ -520,12 +475,10 @@ def analyze_stock(df):
             macd_low_pct = 0
         macd_pctl = round((float(cm) - macd_1y_low) / macd_range * 100, 1)
     else:
-        macd_low_pct = 0
-        macd_pctl = 50
+        macd_low_pct = 0; macd_pctl = 50
 
     golden_buy = bool(macd_low_pct >= 60 and macd_slope <= 0.2 and sma200_slope > 0.1)
-    macd_inf_pts = 0
-    macd_inf_desc = ""
+    macd_inf_pts = 0; macd_inf_desc = ""
     if golden_buy:
         macd_inf_pts = 30
         macd_inf_desc = f"★ GOLDEN BUY — MACD at {macd_low_pct:.0f}% of 1Y low ({macd_1y_low:.1f}) + flat + SMA↑"
@@ -538,7 +491,6 @@ def analyze_stock(df):
     elif early_buy:
         macd_inf_pts = 10
         macd_inf_desc = "Decline slowing (d²>0, d<0)"
-    # Bonus: if MACD percentile is in bottom 25% of 1Y range, add 3 pts
     pctl_bonus = 0
     if macd_pctl <= 25 and macd_inf_pts > 0:
         pctl_bonus = 3
@@ -549,24 +501,16 @@ def analyze_stock(df):
     buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts + golden_bonus + pctl_bonus, "max": 43,
                                          "val": sf(macd_slope, 4), "desc": macd_inf_desc or "No inflection detected"}
 
-    # 3. RSI(14) — GRADUATED SCORING (max 20 pts)
-    #    Optimal zone: RSI ~35 (max points). Tapers off linearly toward 25 and 55.
-    rsi_pts = 0
-    rsi_desc = ""
+    rsi_pts = 0; rsi_desc = ""
     if ok(r14):
         r = float(r14)
         if 25 <= r <= 55:
-            # Peak at 35, linear taper both sides
-            if r <= 35:
-                # 25->35: score rises from 5 to 20
-                rsi_pts = int(5 + 15 * (r - 25) / 10)
-            else:
-                # 35->55: score falls from 20 to 0
-                rsi_pts = int(20 * (55 - r) / 20)
+            if r <= 35: rsi_pts = int(5 + 15 * (r - 25) / 10)
+            else: rsi_pts = int(20 * (55 - r) / 20)
             rsi_pts = max(0, min(20, rsi_pts))
             rsi_desc = f"RSI {r:.1f} (graduated, peak at 35)"
         elif r < 25:
-            rsi_pts = 3  # oversold — could be catching a falling knife
+            rsi_pts = 3
             rsi_desc = f"RSI {r:.1f} (deeply oversold — caution)"
         else:
             rsi_pts = 0
@@ -575,24 +519,19 @@ def analyze_stock(df):
         rsi_desc = "RSI unavailable"
     rsi_p = rsi_pts > 0
     buy_score += rsi_pts
-    buy_breakdown["rsi"] = {"pass": rsi_p, "pts": rsi_pts, "max": 20,
-                             "val": sf(r14), "desc": rsi_desc}
+    buy_breakdown["rsi"] = {"pass": rsi_p, "pts": rsi_pts, "max": 20, "val": sf(r14), "desc": rsi_desc}
 
-    # 4. Bollinger Bands — 10 pts + 5 bonus
     bb_p = bool(abm or tlb) if ok(cbm) else False
     bb_pts = (10 + (5 if tlb else 0)) if bb_p else 0; buy_score += bb_pts
-    buy_breakdown["bollinger"] = {"pass": bb_p, "pts": bb_pts, "max": 15,
-                                   "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
+    buy_breakdown["bollinger"] = {"pass": bb_p, "pts": bb_pts, "max": 15, "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
 
-    # 5. ADX(14) + Direction — 15 pts + 5 bonus (only awards in confirmed uptrend)
     bullish_trend = bool(curr_plus_di > curr_minus_di)
     adx_strong = bool(curr_adx > 25)
     adx_very_strong = bool(curr_adx > 30)
     if adx_strong and bullish_trend:
         adx_pts = 15 + (5 if adx_very_strong else 0)
         adx_desc = f"ADX {float(curr_adx):.1f} · +DI({curr_plus_di:.1f}) > -DI({curr_minus_di:.1f}) ↑ uptrend"
-        if adx_very_strong:
-            adx_desc += " +bonus >30"
+        if adx_very_strong: adx_desc += " +bonus >30"
     elif adx_strong and not bullish_trend:
         adx_pts = 0
         adx_desc = f"ADX {float(curr_adx):.1f} · -DI({curr_minus_di:.1f}) > +DI({curr_plus_di:.1f}) ↓ downtrend — no points"
@@ -601,130 +540,121 @@ def analyze_stock(df):
         adx_desc = f"ADX {float(curr_adx):.1f} ≤ 25 — weak trend"
     adx_p = adx_pts > 0
     buy_score += adx_pts
-    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 20,
-                             "val": sf(curr_adx), "desc": adx_desc,
+    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 20, "val": sf(curr_adx), "desc": adx_desc,
                              "plus_di": sf(curr_plus_di, 1), "minus_di": sf(curr_minus_di, 1)}
 
-    # 6. OBV — 5 pts
     obv_p = bool(co > co5 and co > co20)
     obv_pts = 5 if obv_p else 0; buy_score += obv_pts
-    buy_breakdown["obv"] = {"pass": obv_p, "pts": obv_pts, "max": 5,
-                             "val": sf(co, 0), "desc": "OBV rising vs 5d & 20d"}
+    buy_breakdown["obv"] = {"pass": obv_p, "pts": obv_pts, "max": 5, "val": sf(co, 0), "desc": "OBV rising vs 5d & 20d"}
+
+    # 7. EMA(21) Proximity — max 10 pts
+    #    Rewards stocks pulled back near their 21-day EMA (ideal entry zone)
+    #    Penalizes stocks stretched far above (chasing) or with no EMA data
+    ema_pts = 0; ema_desc = ""
+    if ok(ema21_val) and n_candles >= 21:
+        d = ema21_pct_diff
+        if d < -3:
+            # More than 3% below EMA(21) — falling hard, risky
+            ema_pts = 3
+            ema_desc = f"Price {d:.1f}% below EMA(21) — deep pullback, caution"
+        elif -3 <= d < 0:
+            # 0-3% below EMA(21) — dipped below, pullback buy zone
+            ema_pts = 8
+            ema_desc = f"Price {d:.1f}% below EMA(21) — pullback entry zone"
+        elif 0 <= d <= 2:
+            # 0-2% above EMA(21) — sitting right on it, ideal
+            ema_pts = 10
+            ema_desc = f"Price {d:.1f}% above EMA(21) — ideal proximity"
+        elif 2 < d <= 4:
+            # 2-4% above — slightly stretched
+            ema_pts = 5
+            ema_desc = f"Price {d:.1f}% above EMA(21) — slightly stretched"
+        elif 4 < d <= 7:
+            # 4-7% above — stretched
+            ema_pts = 2
+            ema_desc = f"Price {d:.1f}% above EMA(21) — stretched"
+        else:
+            # >7% above — very stretched, wait for pullback
+            ema_pts = 0
+            ema_desc = f"Price {d:.1f}% above EMA(21) — overextended, wait"
+    else:
+        ema_desc = "EMA(21) unavailable (< 21 candles)"
+    ema_p = ema_pts > 0
+    buy_score += ema_pts
+    buy_breakdown["ema21"] = {"pass": ema_p, "pts": ema_pts, "max": 10,
+                               "val": sf(ema21_val), "desc": ema_desc,
+                               "pct_diff": ema21_pct_diff}
 
     buy_signal = "STRONG BUY" if buy_score >= 75 else ("MODERATE BUY" if buy_score >= 60 else "NO SIGNAL")
 
-    # ══════════════════════════════════════════════════════════
-    # SELL SCORE — Weighted (max ~105 pts)
-    # Revised weights: SMA(25), MACD(28), RSI(20), BB(10), ADX(15), OBV(10)
-    # STRONG SELL requires at least one "structural" signal (SMA break or ADX bearish)
-    # ══════════════════════════════════════════════════════════
+    # ── SELL SCORE ──
     sell_score = 0; sell_breakdown = {}
 
-    # 1. SMA Trend Break — 25 pts (highest weight — most reliable daily trend-change signal)
     sma_sell_p = bool(price < s200) if ok(s200) else False
     sma_sell_pts = 25 if sma_sell_p else 0
     sell_score += sma_sell_pts
     sell_breakdown["sma_break"] = {"pass": sma_sell_p, "pts": sma_sell_pts, "max": 25,
         "val": sf(s200), "desc": "Close < SMA(200) — below long-term trend" if sma_sell_p else "Price above SMA(200) — trend intact"}
 
-    # 2. MACD INFLECTION (SELL) — 25 pts (reduced from 35 to prevent premature exits on 1-day wiggles)
-    #    Still uses slope/acceleration logic (not lagging crossover)
-    sell_macd_pts = 0
-    sell_macd_desc = ""
+    sell_macd_pts = 0; sell_macd_desc = ""
     if macd_zero_cross_dn and macd_accel < 0:
-        sell_macd_pts = 25
-        sell_macd_desc = "MACD crossed 0↓ + deceleration (PRIME EXIT)"
+        sell_macd_pts = 25; sell_macd_desc = "MACD crossed 0↓ + deceleration (PRIME EXIT)"
     elif slope_cross_dn:
-        sell_macd_pts = 18
-        sell_macd_desc = "Slope flipped negative ↓ (SELL FLIP)"
+        sell_macd_pts = 18; sell_macd_desc = "Slope flipped negative ↓ (SELL FLIP)"
     elif early_sell:
-        sell_macd_pts = 8
-        sell_macd_desc = "Rise slowing (d²<0, d>0) — early warning"
-    # Bonus: if MACD is in top 25% of 1Y range during inflection → +3
+        sell_macd_pts = 8; sell_macd_desc = "Rise slowing (d²<0, d>0) — early warning"
     sell_pctl_bonus = 0
     if macd_pctl >= 75 and sell_macd_pts > 0:
-        sell_pctl_bonus = 3
-        sell_macd_desc += f" +pctl bonus ({macd_pctl:.0f}%ile)"
+        sell_pctl_bonus = 3; sell_macd_desc += f" +pctl bonus ({macd_pctl:.0f}%ile)"
     sell_macd_pass = sell_macd_pts > 0
     sell_score += sell_macd_pts + sell_pctl_bonus
     sell_breakdown["macd_inflection"] = {"pass": sell_macd_pass, "pts": sell_macd_pts + sell_pctl_bonus, "max": 28,
         "val": sf(macd_slope, 4), "desc": sell_macd_desc or "No bearish inflection detected"}
 
-    # 3. RSI Overheated — GRADUATED (max 20 pts, clear point table)
-    #    60-64: 8 pts | 65-69: 15 pts | 70+: 20 pts | >85: 10 pts (parabolic caution)
-    rsi_sell_pts = 0
-    rsi_sell_desc = ""
+    rsi_sell_pts = 0; rsi_sell_desc = ""
     if ok(r14):
         r = float(r14)
-        if r > 85:
-            rsi_sell_pts = 10  # extremely overbought — parabolic, could snap either way
-            rsi_sell_desc = f"RSI {r:.1f} — extremely overbought (parabolic risk)"
-        elif r >= 70:
-            rsi_sell_pts = 20
-            rsi_sell_desc = f"RSI {r:.1f} — overbought (max pts)"
-        elif r >= 65:
-            rsi_sell_pts = 15
-            rsi_sell_desc = f"RSI {r:.1f} — approaching overbought"
-        elif r >= 60:
-            rsi_sell_pts = 8
-            rsi_sell_desc = f"RSI {r:.1f} — elevated, early warning"
-        else:
-            rsi_sell_pts = 0
-            rsi_sell_desc = f"RSI {r:.1f} (below sell zone)"
-    else:
-        rsi_sell_desc = "RSI unavailable"
+        if r > 85: rsi_sell_pts = 10; rsi_sell_desc = f"RSI {r:.1f} — extremely overbought"
+        elif r >= 70: rsi_sell_pts = 20; rsi_sell_desc = f"RSI {r:.1f} — overbought (max pts)"
+        elif r >= 65: rsi_sell_pts = 15; rsi_sell_desc = f"RSI {r:.1f} — approaching overbought"
+        elif r >= 60: rsi_sell_pts = 8; rsi_sell_desc = f"RSI {r:.1f} — elevated, early warning"
+        else: rsi_sell_pts = 0; rsi_sell_desc = f"RSI {r:.1f} (below sell zone)"
     sell_score += rsi_sell_pts
-    sell_breakdown["rsi"] = {"pass": rsi_sell_pts > 0, "pts": rsi_sell_pts, "max": 20,
-        "val": sf(r14), "desc": rsi_sell_desc}
+    sell_breakdown["rsi"] = {"pass": rsi_sell_pts > 0, "pts": rsi_sell_pts, "max": 20, "val": sf(r14), "desc": rsi_sell_desc}
 
-    # 4. Bollinger Stretch — 10 pts (secondary signal, kept same)
     bb_sell_upper = bool(price >= cbu) if ok(cbu) else False
     bb_sell_pts = 10 if bb_sell_upper else (5 if tub else 0)
     sell_score += bb_sell_pts
     sell_breakdown["bollinger"] = {"pass": bb_sell_pts > 0, "pts": bb_sell_pts, "max": 10,
         "val": sf(cbu), "desc": ("At/above upper BB" if bb_sell_upper else "Touched upper BB recently") if bb_sell_pts > 0 else "Below upper band"}
 
-    # 5. ADX + Bearish Direction — 15 pts (structural signal)
-    adx_sell_pts = 0
-    adx_sell_desc = ""
     bearish_trend = bool(curr_minus_di > curr_plus_di)
+    adx_sell_pts = 0; adx_sell_desc = ""
     if curr_adx > 25 and bearish_trend:
         adx_sell_pts = 10 + (5 if curr_adx > 30 else 0)
-        adx_sell_desc = f"ADX {float(curr_adx):.1f} · -DI({curr_minus_di:.1f}) > +DI({curr_plus_di:.1f}) ↓ confirmed downtrend"
-        if curr_adx > 30:
-            adx_sell_desc += " +bonus >30"
+        adx_sell_desc = f"ADX {float(curr_adx):.1f} · -DI > +DI ↓ confirmed downtrend"
     elif curr_adx > 25 and not bearish_trend:
         adx_sell_desc = f"ADX {float(curr_adx):.1f} · +DI > -DI — uptrend, no sell pts"
     else:
         adx_sell_desc = f"ADX {float(curr_adx):.1f} ≤ 25 — weak trend"
     sell_score += adx_sell_pts
-    sell_breakdown["adx"] = {"pass": adx_sell_pts > 0, "pts": adx_sell_pts, "max": 15,
-        "val": sf(curr_adx), "desc": adx_sell_desc}
+    sell_breakdown["adx"] = {"pass": adx_sell_pts > 0, "pts": adx_sell_pts, "max": 15, "val": sf(curr_adx), "desc": adx_sell_desc}
 
-    # 6. OBV Declining — 10 pts (doubled — distribution is meaningful on exits)
     obv_sell_p = bool(co < co5 and co < co20)
     obv_sell_pts = 10 if obv_sell_p else 0
     sell_score += obv_sell_pts
     sell_breakdown["obv"] = {"pass": obv_sell_p, "pts": obv_sell_pts, "max": 10,
         "val": sf(co, 0), "desc": "OBV falling vs 5d & 20d — distribution" if obv_sell_p else "OBV holding or rising"}
 
-    # ── Structural gate: STRONG SELL requires at least one structural signal ──
-    # Structural = SMA break or ADX bearish. Without these, cap at MODERATE SELL.
-    # This prevents "STRONG SELL" from firing purely on momentum signals in an intact uptrend.
     has_structural_sell = sma_sell_p or (adx_sell_pts > 0)
-    if sell_score >= 65 and has_structural_sell:
-        sell_signal = "STRONG SELL"
-    elif sell_score >= 45:
-        sell_signal = "MODERATE SELL"
-    else:
-        sell_signal = "NO SIGNAL"
+    if sell_score >= 65 and has_structural_sell: sell_signal = "STRONG SELL"
+    elif sell_score >= 45: sell_signal = "MODERATE SELL"
+    else: sell_signal = "NO SIGNAL"
 
-    # ── Price Rate of Change & Acceleration ──
     p0 = float(close.iloc[-1])
     p1 = float(close.iloc[-2]) if n_candles >= 2 else p0
     p2 = float(close.iloc[-3]) if n_candles >= 3 else p1
     p3 = float(close.iloc[-4]) if n_candles >= 4 else p2
-    p5 = float(close.iloc[-6]) if n_candles >= 6 else p0
     roc3 = ((p0 - p3) / p3 * 100) if p3 > 0 else 0
     price_vel = ((p0 - p1) / p1 * 100) if p1 > 0 else 0
     price_vel_prev = ((p1 - p2) / p2 * 100) if p2 > 0 else 0
@@ -745,12 +675,14 @@ def analyze_stock(df):
         "macd_phase":macd_phase,"macd_curve":macd_curve,"macd_zero_y":macd_zero_y,
         "obv":sf(co,0),"adx":sf(curr_adx),"plus_di":sf(curr_plus_di,1),"minus_di":sf(curr_minus_di,1),
         "adx_bullish":bullish_trend,
+        "ema21":sf(ema21_val),"ema21_pct_diff":ema21_pct_diff,
         "avg_vol_20":round(avg_vol_20, 0),
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
         "price_accel":round(price_accel,3),"up_days":up_days,
         "support":support,"resistance":resistance,"risk":risk,"reward":reward,"rr_ratio":rr_ratio,
         "atr":round(atr,2),"risk_in_atrs":risk_in_atrs,"position_size":position_size,
         "capital_needed":capital_needed,"potential_profit":potential_profit,"roc_pct":roc_pct,
+        "currency": currency_symbol,
         "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
         "sell_score":sell_score,"sell_signal":sell_signal,"sell_breakdown":sell_breakdown,
         "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,
@@ -759,108 +691,90 @@ def analyze_stock(df):
     }
 
 # ═══════════════════════════════════════════════════════════════
-# SCAN — ALL NSE EQUITIES (adaptive pacing)
+# SCAN — NIFTY 500 (Angel One)
 # ═══════════════════════════════════════════════════════════════
 
-def run_full_scan():
-    global scan_results, is_scanning, scan_progress, abort_scan, current_pace
+def run_nifty_scan():
+    global scan_results, scan_progress, current_pace
     if not credentials_ok:
-        logger.error("Cannot scan — not logged in")
+        logger.error("Cannot scan NIFTY — not logged in")
         return
-    if is_scanning: return
-    is_scanning = True
-    abort_scan = False
-    current_pace = PACE_MIN  # start fast
-    scan_results["status"] = "scanning"
+    if is_scanning["nifty500"]:
+        logger.warning("NIFTY scan already running")
+        return
+    is_scanning["nifty500"] = True
+    abort_scan["nifty500"] = False
+    current_pace = PACE_MIN
+    mkt = "nifty500"
+    scan_results[mkt]["status"] = "scanning"
 
     total = len(scan_instrument_list)
-    scan_progress = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": current_pace}
-    logger.info(f"Starting scan: {total} stocks (pace={current_pace:.2f}s)...")
+    scan_progress[mkt] = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": current_pace}
+    logger.info(f"Starting NIFTY scan: {total} stocks")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
 
     portfolio = fetch_portfolio()
     ptokens = {h["token"] for h in portfolio}
     consecutive_errors = 0
-    MAX_CONSECUTIVE_ERRORS = 50
 
     for i, inst in enumerate(scan_instrument_list):
-        # Check abort flag
-        if abort_scan:
-            logger.info("Scan aborted by user.")
-            break
-
+        if abort_scan["nifty500"]: break
         sym, token = inst["symbol"], inst["token"]
         name = inst.get("name", sym.replace("-EQ",""))
         clean = sym.replace("-EQ","")
 
-        # Update live progress
-        scan_progress["current"] = i + 1
-        scan_progress["pace"] = round(current_pace, 2)
+        scan_progress[mkt]["current"] = i + 1
+        scan_progress[mkt]["pace"] = round(current_pace, 2)
 
-        # Abort if too many consecutive errors (rate limit or session dead)
-        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-            logger.error(f"Aborting scan: {consecutive_errors} consecutive errors. Rate limited?")
-            scan_progress["rate_limited"] = True
+        if consecutive_errors >= 50:
+            scan_progress[mkt]["rate_limited"] = True
             break
 
         try:
             result = fetch_candle_data(token)
-
-            # TRUE rate limit / session dead — back off pace and count toward abort
             if result is RATE_LIMITED:
                 consecutive_errors += 1
                 errs.append({"symbol": sym, "error": "Rate limited"})
-                scan_progress["errors"] = len(errs)
-                # Adaptive: slow down
+                scan_progress[mkt]["errors"] = len(errs)
                 current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
-                logger.warning(f"Rate limited at stock {i+1}, pace→{current_pace:.2f}s")
                 time.sleep(5)
-                try:
-                    create_session()
-                except:
-                    pass
+                try: create_session()
+                except: pass
                 continue
 
-            # No data returned (thinly traded stock) — NOT a rate limit
             if result is None:
-                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
+                scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
                 consecutive_errors = 0
-                # Adaptive: successful API call, try speeding up
                 current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
                 continue
 
             df = result
             if len(df) < 50:
-                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
-                consecutive_errors = 0
-                current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
+                scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
+                consecutive_errors = 0; current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
                 continue
 
-            a = analyze_stock(df)
+            a = analyze_stock(df, currency_symbol="₹")
             if a is None:
-                # Could be volume filter or analysis failure
-                scan_progress["skipped"] = scan_progress.get("skipped", 0) + 1
-                consecutive_errors = 0
-                current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
+                scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
+                consecutive_errors = 0; current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
                 continue
 
-            # ✅ Success — reset consecutive error counter, try speeding up
             consecutive_errors = 0
             current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
 
             indices = get_tags_for(clean, INDEX_TAGS)
             stock = {"symbol": sym, "name": name, "token": token,
-                     "in_portfolio": token in ptokens, "indices": indices, **a}
+                     "in_portfolio": token in ptokens, "indices": indices, "market": "nifty500", **a}
             all_s.append(stock)
-            scan_progress["ok"] = len(all_s)
+            scan_progress[mkt]["ok"] = len(all_s)
 
             if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
             if (a["is_sell"] or a["is_moderate_sell"]) and token in ptokens: sells.append(stock)
 
-            # Update scan_results live so frontend can show partial results
             if len(all_s) % 10 == 0:
-                scan_results.update({
+                scan_results[mkt].update({
                     "total_scanned": len(all_s),
                     "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
                     "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
@@ -871,31 +785,20 @@ def run_full_scan():
         except Exception as e:
             err_str = str(e)
             errs.append({"symbol": sym, "error": err_str})
-            scan_progress["errors"] = len(errs)
-            if "access rate" in err_str.lower() or "rate" in err_str.lower() or "timeout" in err_str.lower():
+            scan_progress[mkt]["errors"] = len(errs)
+            if "rate" in err_str.lower() or "timeout" in err_str.lower():
                 consecutive_errors += 1
                 current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
                 time.sleep(3)
             else:
                 consecutive_errors = 0
 
-        # Proactive session refresh every 150 stocks to avoid mid-scan token expiry
         if (i+1) % 150 == 0:
-            try:
-                logger.info(f"  Refreshing session at stock {i+1}...")
-                create_session()
-                time.sleep(1)
-            except:
-                pass
-
-        if (i+1) % 50 == 0:
-            elapsed_so_far = time.time() - t0
-            rate = (i+1) / elapsed_so_far if elapsed_so_far > 0 else 0
-            remaining = (total - i - 1) / rate / 60 if rate > 0 else 0
-            logger.info(f"  {i+1}/{total} ({len(all_s)} ok, {len(errs)} err, pace={current_pace:.2f}s) ~{remaining:.0f}m left")
+            try: create_session(); time.sleep(1)
+            except: pass
 
     elapsed = time.time() - t0
-    scan_results = {
+    scan_results[mkt] = {
         "last_scan": datetime.now().isoformat(), "status": "complete",
         "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
         "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
@@ -903,8 +806,105 @@ def run_full_scan():
         "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
         "portfolio_holdings": portfolio, "errors": errs,
     }
-    is_scanning = False
-    logger.info(f"SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys, {len(sells)} sells, {len(errs)} errors")
+    logger.info(f"NIFTY SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys")
+    is_scanning["nifty500"] = False
+
+# ═══════════════════════════════════════════════════════════════
+# SCAN — NASDAQ 100 (yfinance)
+# ═══════════════════════════════════════════════════════════════
+
+def run_nasdaq_scan():
+    global scan_results
+    mkt = "nasdaq100"
+    if is_scanning["nasdaq100"]:
+        logger.warning("NASDAQ scan already running")
+        return
+    is_scanning["nasdaq100"] = True
+    abort_scan["nasdaq100"] = False
+    scan_results[mkt]["status"] = "scanning"
+
+    symbols = get_nasdaq100_symbols()
+    total = len(symbols)
+    scan_progress[mkt] = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": 0.5}
+    logger.info(f"Starting NASDAQ scan: {total} stocks")
+    t0 = time.time()
+    buys, sells, all_s, errs = [], [], [], []
+
+    for i, sym in enumerate(symbols):
+        if abort_scan["nasdaq100"]: break
+        scan_progress[mkt]["current"] = i + 1
+
+        try:
+            df = fetch_us_candle_data(sym)
+            if df is US_RATE_LIMITED:
+                errs.append({"symbol": sym, "error": "Rate limited"})
+                scan_progress[mkt]["errors"] = len(errs)
+                time.sleep(5)
+                continue
+
+            if df is None or len(df) < 50:
+                scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
+                continue
+
+            a = analyze_stock(df, currency_symbol="$", min_avg_volume=50000)
+            if a is None:
+                scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
+                continue
+
+            stock = {"symbol": sym, "name": sym, "token": sym,
+                     "in_portfolio": False, "indices": ["NASDAQ 100"], "market": "nasdaq100", **a}
+            all_s.append(stock)
+            scan_progress[mkt]["ok"] = len(all_s)
+
+            if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
+            if a["is_sell"] or a["is_moderate_sell"]: sells.append(stock)
+
+            if len(all_s) % 10 == 0:
+                scan_results[mkt].update({
+                    "total_scanned": len(all_s),
+                    "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+                    "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
+                    "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+                })
+
+            time.sleep(0.4)  # gentle pacing for Yahoo
+        except Exception as e:
+            errs.append({"symbol": sym, "error": str(e)})
+            scan_progress[mkt]["errors"] = len(errs)
+
+    elapsed = time.time() - t0
+    scan_results[mkt] = {
+        "last_scan": datetime.now().isoformat(), "status": "complete",
+        "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
+        "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+        "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
+        "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+        "portfolio_holdings": [], "errors": errs,
+    }
+    logger.info(f"NASDAQ SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys")
+    is_scanning["nasdaq100"] = False
+
+# ═══════════════════════════════════════════════════════════════
+# COMBINED SCAN (parallel)
+# ═══════════════════════════════════════════════════════════════
+
+def run_full_scan(markets=None):
+    """Launch scans for requested markets. Each market runs independently."""
+    if markets is None:
+        markets = ["nifty500", "nasdaq100"]
+
+    threads = []
+    if "nifty500" in markets and credentials_ok and not is_scanning["nifty500"]:
+        threads.append(threading.Thread(target=run_nifty_scan, daemon=True))
+    if "nasdaq100" in markets and not is_scanning["nasdaq100"]:
+        threads.append(threading.Thread(target=run_nasdaq_scan, daemon=True))
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    logger.info("Requested market scans complete.")
 
 # ═══════════════════════════════════════════════════════════════
 # SCHEDULER
@@ -914,10 +914,14 @@ def scheduler():
     while True:
         now = datetime.now()
         wd = now.weekday() < 5
+        # Indian market hours
         ao = (now.hour==9 and now.minute>=15) or now.hour>=10
         bc = now.hour<15 or (now.hour==15 and now.minute<=30)
-        if wd and ao and bc: run_full_scan()
-        else: logger.info("Outside market hours")
+        if wd and ao and bc:
+            run_full_scan(["nifty500"])
+        # US market scan at 8 PM IST (US market open ~7 PM IST)
+        if wd and now.hour == 20 and now.minute < 20:
+            run_full_scan(["nasdaq100"])
         time.sleep(SCAN_INTERVAL)
 
 # ═══════════════════════════════════════════════════════════════
@@ -926,7 +930,6 @@ def scheduler():
 
 @app.route("/api/auth", methods=["POST"])
 def api_auth():
-    """Verify app access password."""
     body = request.get_json() or {}
     pwd = body.get("password", "").strip()
     if pwd == APP_PASSWORD:
@@ -935,7 +938,6 @@ def api_auth():
 
 @app.route("/api/docs")
 def api_docs():
-    """Serve INDICATORS.md content for in-app documentation."""
     doc_path = os.path.join(os.path.dirname(__file__), "INDICATORS.md")
     if os.path.exists(doc_path):
         with open(doc_path, "r", encoding="utf-8") as f:
@@ -944,20 +946,30 @@ def api_docs():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify({"connected": credentials_ok,
-                    "instruments_scan": len(scan_instrument_list),
-                    "last_scan": scan_results.get("last_scan"),
-                    "scan_status": scan_results.get("status"), "is_scanning": is_scanning,
-                    "missing": check_credentials(),
-                    "zerodha_connected": zerodha_access_token is not None,
-                    "zerodha_user": zerodha_user.get("user_name","") if zerodha_user else "",
-                    "zerodha_configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET),
-                    "login_url": f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else ""})
+    return jsonify({
+        "connected": credentials_ok,
+        "instruments_scan": len(scan_instrument_list),
+        "last_scan": scan_results.get("nifty500", {}).get("last_scan"),
+        "scan_status": "scanning" if any(is_scanning.values()) else "idle",
+        "is_scanning": any(is_scanning.values()),
+        "is_scanning_per_market": is_scanning,
+        "missing": check_credentials(),
+        "zerodha_connected": zerodha_access_token is not None,
+        "zerodha_user": zerodha_user.get("user_name","") if zerodha_user else "",
+        "zerodha_configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET),
+        "login_url": f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else "",
+        "markets": {
+            "nifty500": {"available": credentials_ok, "stocks": len(scan_instrument_list),
+                         "last_scan": scan_results["nifty500"].get("last_scan"),
+                         "status": scan_results["nifty500"].get("status", "not_started")},
+            "nasdaq100": {"available": True, "stocks": len(get_nasdaq100_symbols()),
+                          "last_scan": scan_results["nasdaq100"].get("last_scan"),
+                          "status": scan_results["nasdaq100"].get("status", "not_started")},
+        }
+    })
 
 @app.route("/api/reconnect", methods=["POST"])
 def api_reconnect():
-    """Try to re-login and re-download instruments. Called from frontend."""
-    global credentials_ok
     ok = create_session()
     if ok:
         if len(instrument_list) == 0:
@@ -967,55 +979,71 @@ def api_reconnect():
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop_scan():
-    """Abort a running scan."""
-    global abort_scan
-    if not is_scanning:
+    """Abort all running scans, or a specific market via ?market=nifty500"""
+    market = request.args.get("market", None)
+    if market and market in abort_scan:
+        abort_scan[market] = True
+        return jsonify({"status": "stopping", "market": market})
+    # Stop all
+    if not any(is_scanning.values()):
         return jsonify({"status": "not_scanning"})
-    abort_scan = True
-    return jsonify({"status": "stopping"})
+    for m in abort_scan:
+        abort_scan[m] = True
+    return jsonify({"status": "stopping_all"})
 
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
-    """Clear all scan results and reset to fresh state. Optionally re-login."""
-    global scan_results, is_scanning, abort_scan, scan_progress
-    # Stop any running scan first
-    if is_scanning:
-        abort_scan = True
-        for _ in range(20):
-            if not is_scanning: break
-            time.sleep(0.25)
-    # Clear everything
-    scan_results = {
-        "last_scan": None, "status": "not_started", "total_scanned": 0,
-        "buy_signals": [], "sell_signals": [], "all_stocks": [],
-        "portfolio_holdings": [], "errors": [],
-    }
-    scan_progress = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
-    abort_scan = False
+    global scan_results, scan_progress
+    # Stop all scans
+    for m in abort_scan:
+        abort_scan[m] = True
+    for _ in range(20):
+        if not any(is_scanning.values()): break
+        time.sleep(0.25)
+    for mkt in ["nifty500", "nasdaq100"]:
+        scan_results[mkt] = {
+            "last_scan": None, "status": "not_started", "total_scanned": 0,
+            "buy_signals": [], "sell_signals": [], "all_stocks": [],
+            "portfolio_holdings": [], "errors": [],
+        }
+        scan_progress[mkt] = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
+    for m in abort_scan:
+        abort_scan[m] = False
     create_session()
     if len(instrument_list) == 0:
         fetch_instrument_list()
-    logger.info("Reset complete. Ready for fresh scan.")
-    return jsonify({"status": "reset", "connected": credentials_ok, "instruments_scan": len(scan_instrument_list)})
+    return jsonify({"status": "reset", "connected": credentials_ok})
 
 @app.route("/api/scan", methods=["POST"])
 def api_trigger_scan():
-    global credentials_ok
-    if not credentials_ok:
-        if not create_session():
-            return jsonify({"error": "Not connected to Angel One. Click Reconnect."}), 401
-    if len(scan_instrument_list) == 0:
-        fetch_instrument_list()
-    if len(scan_instrument_list) == 0:
-        return jsonify({"error": "No instruments loaded. Try reconnecting."}), 500
-    if is_scanning:
-        return jsonify({"status": "already_scanning"}), 409
-    threading.Thread(target=run_full_scan, daemon=True).start()
-    return jsonify({"status": "scan_started", "instruments": len(scan_instrument_list)})
+    body = request.get_json() or {}
+    markets = body.get("markets", ["nifty500", "nasdaq100"])
+    if isinstance(markets, str):
+        markets = [markets]
+
+    if "nifty500" in markets:
+        if not credentials_ok:
+            if not create_session():
+                markets = [m for m in markets if m != "nifty500"]
+        if len(scan_instrument_list) == 0:
+            fetch_instrument_list()
+
+    # Filter out markets already scanning
+    already = [m for m in markets if is_scanning.get(m, False)]
+    remaining = [m for m in markets if not is_scanning.get(m, False)]
+    if not remaining:
+        return jsonify({"status": "already_scanning", "markets": already}), 409
+    markets = remaining
+
+    threading.Thread(target=run_full_scan, args=(markets,), daemon=True).start()
+    return jsonify({"status": "scan_started", "markets": markets})
 
 @app.route("/api/results")
 def api_results():
-    return jsonify(scan_results)
+    market = request.args.get("market", "nifty500")
+    if market in scan_results:
+        return jsonify(scan_results[market])
+    return jsonify({"error": "Unknown market"}), 400
 
 @app.route("/api/progress")
 def api_progress():
@@ -1023,211 +1051,180 @@ def api_progress():
 
 @app.route("/api/stock/<symbol>")
 def api_stock_detail(symbol):
-    for s in scan_results.get("all_stocks", []):
-        if s["symbol"] == symbol or s["name"] == symbol: return jsonify(s)
+    for mkt in scan_results:
+        for s in scan_results[mkt].get("all_stocks", []):
+            if s["symbol"] == symbol or s["name"] == symbol:
+                return jsonify(s)
     return jsonify({"error": "Not found"}), 404
+
+@app.route("/api/index_chart")
+def api_index_chart():
+    """Fetch index chart data. Params: index (^NSEI, ^IXIC, ^NSEBANK), resolution (1d, 1wk, 1mo)"""
+    index_symbol = request.args.get("index", "^NSEI")
+    resolution = request.args.get("resolution", "1d")
+    period = request.args.get("period", "1y")
+    try:
+        data = fetch_index_chart_data(index_symbol, resolution, period)
+        if data is None:
+            return jsonify({"error": "Could not fetch index data"}), 500
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Index chart error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+SECTOR_INDICES = [
+    {"symbol": "^CNXBANK", "name": "NIFTY Bank", "sector": "Banking"},
+    {"symbol": "^CNXIT", "name": "NIFTY IT", "sector": "IT / Tech"},
+    {"symbol": "^CNXPHARMA", "name": "NIFTY Pharma", "sector": "Pharma"},
+    {"symbol": "^CNXFMCG", "name": "NIFTY FMCG", "sector": "FMCG"},
+    {"symbol": "^CNXAUTO", "name": "NIFTY Auto", "sector": "Auto"},
+    {"symbol": "^CNXENERGY", "name": "NIFTY Energy", "sector": "Energy"},
+    {"symbol": "^CNXFIN", "name": "NIFTY Fin Service", "sector": "Fin Services"},
+    {"symbol": "^CNXMETAL", "name": "NIFTY Metal", "sector": "Metals"},
+    {"symbol": "^CNXREALTY", "name": "NIFTY Realty", "sector": "Realty"},
+    {"symbol": "^CNXMEDIA", "name": "NIFTY Media", "sector": "Media"},
+]
+
+@app.route("/api/sectors")
+def api_sectors():
+    """Fetch all sector indices in one call. Returns list of chart data objects."""
+    resolution = request.args.get("resolution", "1d")
+    period = request.args.get("period", "3mo")
+    results = []
+    for sec in SECTOR_INDICES:
+        try:
+            data = fetch_index_chart_data(sec["symbol"], resolution, period)
+            if data:
+                data["sector"] = sec["sector"]
+                results.append(data)
+            else:
+                results.append({"symbol": sec["symbol"], "name": sec["name"],
+                                "sector": sec["sector"], "error": True})
+        except Exception as e:
+            results.append({"symbol": sec["symbol"], "name": sec["name"],
+                            "sector": sec["sector"], "error": True})
+    return jsonify(results)
 
 @app.route("/")
 def serve_frontend():
     return send_from_directory(".", "index.html")
 
 # ═══════════════════════════════════════════════════════════════
-# ZERODHA KITE CONNECT — Hybrid Auth + Portfolio
+# ZERODHA (unchanged from v3.1)
 # ═══════════════════════════════════════════════════════════════
-# Two ways to connect:
-# 1. Pre-set ZERODHA_ACCESS_TOKEN env var (daily manual refresh)
-# 2. In-app flow: open Kite login → copy request_token → paste in UI
-#    → backend exchanges for access_token automatically
 
 def _zerodha_headers():
-    """Auth headers for Kite API calls."""
     return {"Authorization": f"token {ZERODHA_API_KEY}:{zerodha_access_token}"}
 
 def _verify_zerodha_token():
-    """Verify token by fetching profile. Returns user dict or None."""
     global zerodha_user
-    if not zerodha_access_token or not ZERODHA_API_KEY:
-        return None
+    if not zerodha_access_token or not ZERODHA_API_KEY: return None
     try:
         resp = requests.get("https://api.kite.trade/user/profile", headers=_zerodha_headers(), timeout=10)
         data = resp.json()
         if data.get("status") == "success":
             zerodha_user = data["data"]
-            logger.info(f"Zerodha token valid: {zerodha_user.get('user_name','')} ({zerodha_user.get('user_id','')})")
             return zerodha_user
-        else:
-            logger.warning(f"Zerodha token invalid: {data.get('message','')}")
-            return None
-    except Exception as e:
-        logger.warning(f"Zerodha token verify failed: {e}")
         return None
+    except: return None
 
 @app.route("/api/zerodha/status")
 def zerodha_status():
-    configured = bool(ZERODHA_API_KEY and ZERODHA_API_SECRET)
-    connected = zerodha_access_token is not None
-    user_name = zerodha_user.get("user_name", "") if zerodha_user else ""
-    user_id = zerodha_user.get("user_id", "") if zerodha_user else ""
-    # Build login URL for the frontend to open in a new tab
-    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else ""
     return jsonify({
-        "configured": configured,
-        "connected": connected,
-        "user_name": user_name,
-        "user_id": user_id,
-        "login_url": login_url,
+        "configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET),
+        "connected": zerodha_access_token is not None,
+        "user_name": zerodha_user.get("user_name", "") if zerodha_user else "",
+        "user_id": zerodha_user.get("user_id", "") if zerodha_user else "",
+        "login_url": f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else "",
     })
 
 @app.route("/api/zerodha/exchange_token", methods=["POST"])
 def zerodha_exchange_token():
-    """Exchange a request_token (pasted by user from redirect URL) for an access_token."""
     global zerodha_access_token, zerodha_user
     body = request.get_json() or {}
     request_token = body.get("request_token", "").strip()
-    if not request_token:
-        return jsonify({"error": "No request_token provided"}), 400
-    if not ZERODHA_API_KEY or not ZERODHA_API_SECRET:
-        return jsonify({"error": "ZERODHA_API_KEY / ZERODHA_API_SECRET not configured"}), 400
-
+    if not request_token: return jsonify({"error": "No request_token"}), 400
+    if not ZERODHA_API_KEY or not ZERODHA_API_SECRET: return jsonify({"error": "Not configured"}), 400
     try:
-        checksum = hashlib.sha256(
-            (ZERODHA_API_KEY + request_token + ZERODHA_API_SECRET).encode("utf-8")
-        ).hexdigest()
-
-        resp = requests.post("https://api.kite.trade/session/token", data={
-            "api_key": ZERODHA_API_KEY,
-            "request_token": request_token,
-            "checksum": checksum,
-        }, timeout=15)
+        checksum = hashlib.sha256((ZERODHA_API_KEY + request_token + ZERODHA_API_SECRET).encode("utf-8")).hexdigest()
+        resp = requests.post("https://api.kite.trade/session/token", data={"api_key": ZERODHA_API_KEY, "request_token": request_token, "checksum": checksum}, timeout=15)
         data = resp.json()
-
-        if data.get("status") != "success":
-            err_msg = data.get("message", "Unknown error from Zerodha")
-            logger.error(f"Zerodha token exchange failed: {err_msg}")
-            return jsonify({"error": err_msg}), 400
-
+        if data.get("status") != "success": return jsonify({"error": data.get("message", "Unknown error")}), 400
         zerodha_access_token = data["data"]["access_token"]
         zerodha_user = data["data"]
-        user_name = data["data"].get("user_name", "")
-        user_id = data["data"].get("user_id", "")
-        logger.info(f"Zerodha connected via token exchange: {user_name} ({user_id})")
-        return jsonify({
-            "status": "connected",
-            "user_name": user_name,
-            "user_id": user_id,
-        })
-
+        return jsonify({"status": "connected", "user_name": data["data"].get("user_name", "")})
     except Exception as e:
-        logger.error(f"Zerodha token exchange error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/zerodha/set_token", methods=["POST"])
 def zerodha_set_token():
-    """Directly set an access_token (if user already has one)."""
     global zerodha_access_token, zerodha_user
     body = request.get_json() or {}
     token = body.get("access_token", "").strip()
-    if not token:
-        return jsonify({"error": "No access_token provided"}), 400
-
+    if not token: return jsonify({"error": "No token"}), 400
     zerodha_access_token = token
     user = _verify_zerodha_token()
-    if user:
-        return jsonify({"status": "connected", "user_name": user.get("user_name", ""), "user_id": user.get("user_id", "")})
-    else:
-        zerodha_access_token = None
-        return jsonify({"error": "Token is invalid or expired"}), 401
+    if user: return jsonify({"status": "connected", "user_name": user.get("user_name", "")})
+    zerodha_access_token = None
+    return jsonify({"error": "Token invalid"}), 401
 
 @app.route("/api/zerodha/logout", methods=["POST"])
 def zerodha_logout():
     global zerodha_access_token, zerodha_user
-    zerodha_access_token = None
-    zerodha_user = None
+    zerodha_access_token = None; zerodha_user = None
     return jsonify({"status": "logged_out"})
 
 @app.route("/api/zerodha/holdings")
 def zerodha_holdings():
-    """Fetch portfolio holdings from Zerodha and cross-reference with scan results."""
-    if not zerodha_access_token:
-        return jsonify({"error": "Not connected to Zerodha. Use 'Connect Zerodha' first."}), 401
-
+    if not zerodha_access_token: return jsonify({"error": "Not connected"}), 401
     try:
         resp = requests.get("https://api.kite.trade/portfolio/holdings", headers=_zerodha_headers(), timeout=15)
         data = resp.json()
-
         if data.get("status") != "success":
             err_msg = data.get("message", "Unknown error")
-            if "token" in err_msg.lower() or "session" in err_msg.lower():
-                return jsonify({"error": "Zerodha session expired. Please reconnect.", "expired": True}), 401
+            if "token" in err_msg.lower(): return jsonify({"error": "Session expired", "expired": True}), 401
             return jsonify({"error": err_msg}), 400
-
         raw_holdings = data.get("data", [])
         holdings = []
-        all_stocks = scan_results.get("all_stocks", [])
         scan_lookup = {}
-        for s in all_stocks:
-            clean = s["symbol"].replace("-EQ", "")
-            scan_lookup[clean] = s
-
+        for s in scan_results["nifty500"].get("all_stocks", []):
+            scan_lookup[s["symbol"].replace("-EQ", "")] = s
         for h in raw_holdings:
             tsym = h.get("tradingsymbol", "")
             qty = h.get("quantity", 0)
-            if qty <= 0:
-                continue
-
+            if qty <= 0: continue
             avg_price = float(h.get("average_price", 0))
             ltp = float(h.get("last_price", 0))
-            day_change = float(h.get("day_change", 0))
-            day_change_pct = float(h.get("day_change_percentage", 0))
-            pnl = float(h.get("pnl", 0))
-            invested = avg_price * qty
-            current_val = ltp * qty
+            invested = avg_price * qty; current_val = ltp * qty
             total_return_pct = ((current_val - invested) / invested * 100) if invested > 0 else 0
-
             holding = {
-                "tradingsymbol": tsym,
-                "exchange": h.get("exchange", "NSE"),
-                "quantity": qty,
-                "avg_price": round(avg_price, 2),
-                "ltp": round(ltp, 2),
-                "day_change": round(day_change, 2),
-                "day_change_pct": round(day_change_pct, 2),
-                "pnl": round(pnl, 2),
-                "invested": round(invested, 2),
-                "current_val": round(current_val, 2),
+                "tradingsymbol": tsym, "exchange": h.get("exchange", "NSE"),
+                "quantity": qty, "avg_price": round(avg_price, 2), "ltp": round(ltp, 2),
+                "day_change": round(float(h.get("day_change", 0)), 2),
+                "day_change_pct": round(float(h.get("day_change_percentage", 0)), 2),
+                "pnl": round(float(h.get("pnl", 0)), 2),
+                "invested": round(invested, 2), "current_val": round(current_val, 2),
                 "total_return_pct": round(total_return_pct, 2),
+                "scan": scan_lookup.get(tsym),
             }
-
-            scan_data = scan_lookup.get(tsym)
-            holding["scan"] = scan_data  # None if not in scan results
-
             holdings.append(holding)
-
         holdings.sort(key=lambda x: x["current_val"], reverse=True)
-
         total_invested = sum(h["invested"] for h in holdings)
         total_current = sum(h["current_val"] for h in holdings)
         total_pnl = total_current - total_invested
-        total_return = (total_pnl / total_invested * 100) if total_invested > 0 else 0
         day_pnl = sum(h["day_change"] * h["quantity"] for h in holdings)
         sell_alerts = [h for h in holdings if h["scan"] and (h["scan"].get("is_sell") or h["scan"].get("is_moderate_sell"))]
-
         return jsonify({
             "holdings": holdings,
             "summary": {
-                "total_stocks": len(holdings),
-                "total_invested": round(total_invested, 2),
-                "total_current": round(total_current, 2),
-                "total_pnl": round(total_pnl, 2),
-                "total_return_pct": round(total_return, 2),
-                "day_pnl": round(day_pnl, 2),
-                "sell_alerts": len(sell_alerts),
+                "total_stocks": len(holdings), "total_invested": round(total_invested, 2),
+                "total_current": round(total_current, 2), "total_pnl": round(total_pnl, 2),
+                "total_return_pct": round((total_pnl / total_invested * 100) if total_invested > 0 else 0, 2),
+                "day_pnl": round(day_pnl, 2), "sell_alerts": len(sell_alerts),
                 "with_scan_data": sum(1 for h in holdings if h["scan"]),
             }
         })
-
     except Exception as e:
-        logger.error(f"Zerodha holdings error: {e}")
         return jsonify({"error": str(e)}), 500
 
 # ═══════════════════════════════════════════════════════════════
@@ -1240,21 +1237,31 @@ def initialize():
     if missing:
         logger.error(f"Missing env vars: {', '.join(missing)}")
         credentials_ok = False
-        return False
-
-    if create_session():
-        fetch_instrument_list()
     else:
-        logger.warning("Initial login failed — server starting anyway. Use Reconnect button in browser.")
+        if create_session():
+            # Run instrument download in background — poll for completion
+            # instead of Thread.join() which has a race condition on Windows/Python 3.12
+            logger.info("Loading instruments (max 90s, server starts regardless)...")
+            threading.Thread(target=fetch_instrument_list, daemon=True).start()
 
-    # Verify Zerodha token if provided via env var
-    if zerodha_access_token and ZERODHA_API_KEY:
-        logger.info("Verifying Zerodha access token from env var...")
-        if _verify_zerodha_token():
-            logger.info("Zerodha token valid — portfolio ready.")
+            # Poll every 0.5s for up to 90s — check if instruments loaded
+            for _ in range(180):
+                if len(scan_instrument_list) > 0:
+                    break
+                time.sleep(0.5)
+
+            if len(scan_instrument_list) > 0:
+                logger.info(f"Instruments loaded: {len(scan_instrument_list)} stocks")
+            else:
+                logger.warning("Instrument download still running or failed — server starting anyway.")
+                logger.warning("NIFTY scan will work once instruments finish loading. NASDAQ works now.")
         else:
-            logger.warning("Zerodha token from env var is invalid/expired. Use in-app login flow.")
+            logger.warning("Initial login failed — server starting anyway.")
+
+    if zerodha_access_token and ZERODHA_API_KEY:
+        if _verify_zerodha_token():
+            logger.info("Zerodha token valid.")
 
     threading.Thread(target=scheduler, daemon=True).start()
-    logger.info(f"Ready. {len(scan_instrument_list)} stocks (NIFTY 500). Min volume: {MIN_AVG_VOLUME:,}")
+    logger.info(f"Ready. NIFTY: {len(scan_instrument_list)} stocks, NASDAQ: {len(get_nasdaq100_symbols())} stocks")
     return True

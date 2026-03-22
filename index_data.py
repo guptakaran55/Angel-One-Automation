@@ -2,8 +2,13 @@
 Index constituent lists for Indian stock markets.
 NIFTY 500 downloaded dynamically from NSE at startup.
 Sub-indices (NIFTY 50, NIFTY 100, BSE 100) hardcoded for tagging.
+
+NOTE: Uses urllib (not requests) — requests doesn't honor read timeouts on Windows/Python 3.12.
+NOTE: Uses polling instead of Thread.join() — Python 3.12 on Windows has a race condition
+      where Thread._tstate_lock doesn't release properly, causing join() to hang.
 """
-import requests, logging, io, csv
+import logging, io, csv, ssl, threading, time
+import urllib.request
 logger = logging.getLogger(__name__)
 
 NIFTY_50 = [
@@ -41,9 +46,6 @@ BSE_100_EXTRA = [
     "DIXON","IREDA","ACC","BIOCON","GODREJPROP",
 ]
 BSE_100 = set(NIFTY_50 + NIFTY_NEXT_50 + BSE_100_EXTRA)
-
-# ── Expanded Fallback: NIFTY 500 complete (NIFTY 200 + Midcap 150 + Smallcap 250) ──
-# This runs only if NSE CSV download fails. Updated Feb 2026.
 
 NIFTY_MIDCAP_150_SYMS = [
     "ADANIGREEN","ADANIPOWER","ADANIENERGY","ADANITOTAL",
@@ -128,44 +130,63 @@ NIFTY_500_URLS = [
 ]
 
 def download_nifty500():
-    """Download current NIFTY 500 from NSE. Tries multiple sources. Returns set of symbols or None."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/csv,text/plain,*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    for url in NIFTY_500_URLS:
-        try:
-            logger.info(f"Trying NIFTY 500 from: {url}")
-            resp = requests.get(url, headers=headers, timeout=30)
-            resp.raise_for_status()
-            text = resp.content.decode('utf-8-sig', errors='replace')
-            reader = csv.DictReader(io.StringIO(text))
-            symbols = set()
-            for row in reader:
-                sym = (row.get("Symbol") or row.get("symbol") or row.get("SYMBOL") or "").strip()
-                if sym:
-                    symbols.add(sym)
-            if len(symbols) > 400:
-                logger.info(f"NIFTY 500: {len(symbols)} stocks from {url}")
-                return symbols
-            logger.warning(f"Only {len(symbols)} symbols from {url}")
-        except Exception as e:
-            logger.warning(f"Failed {url}: {e}")
-    logger.warning("All NIFTY 500 sources failed — using expanded fallback")
-    return None
+    """Download current NIFTY 500 from NSE using urllib.
+    Uses polling instead of Thread.join() to avoid Windows/Python 3.12 tstate_lock bug."""
+    result = [None]
+    done = [False]
+
+    def _try_download():
+        for url in NIFTY_500_URLS:
+            try:
+                logger.info(f"Trying NIFTY 500 from: {url}")
+                ctx = ssl.create_default_context()
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0",
+                    "Accept": "text/csv,text/plain,*/*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                })
+                with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                    raw = resp.read()
+                text = raw.decode('utf-8-sig', errors='replace')
+                reader = csv.DictReader(io.StringIO(text))
+                symbols = set()
+                for row in reader:
+                    sym = (row.get("Symbol") or row.get("symbol") or row.get("SYMBOL") or "").strip()
+                    if sym:
+                        symbols.add(sym)
+                if len(symbols) > 400:
+                    logger.info(f"NIFTY 500: {len(symbols)} stocks from {url}")
+                    result[0] = symbols
+                    done[0] = True
+                    return
+                logger.warning(f"Only {len(symbols)} symbols from {url}")
+            except Exception as e:
+                logger.warning(f"Failed {url}: {e}")
+        done[0] = True
+
+    threading.Thread(target=_try_download, daemon=True).start()
+
+    # Poll instead of join — avoids tstate_lock bug on Windows/Python 3.12
+    for _ in range(40):  # 40 x 0.5s = 20s max
+        if done[0]:
+            break
+        time.sleep(0.5)
+
+    if not done[0]:
+        logger.warning("NIFTY 500 download timed out after 20s — using fallback list")
+        return None
+    return result[0]
 
 
 def get_scan_universe():
-    """Get the set of symbols to scan. Tries NIFTY 500 CSV, falls back to hardcoded ~350."""
     n500 = download_nifty500()
     if n500:
         return n500
+    logger.warning("Using expanded fallback list (~350 stocks)")
     return FALLBACK_SET
 
 
 def build_index_tags():
-    """Returns dict: symbol -> list of index tags (NIFTY 50, NIFTY 100, BSE 100)."""
     tags = {}
     for sym in NIFTY_50:
         tags.setdefault(sym, []).append("NIFTY 50")
@@ -177,5 +198,4 @@ def build_index_tags():
 
 
 def get_tags_for(symbol, tag_map):
-    """Get index tags for a symbol."""
     return tag_map.get(symbol, [])

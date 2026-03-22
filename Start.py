@@ -1,22 +1,25 @@
 """
-SignalScope — Run this file to start.
+SignalScope v4.0 — Multi-Market Edition
+Run this file to start.
 
 Usage:
+    pip install -r requirements.txt
     python start.py
 """
 
 import os
 from dotenv import load_dotenv
 
-# Load your .env file first
 load_dotenv()
 
 from app import app, initialize
 
 print()
-print("  ╔═══════════════════════════════════════╗")
-print("  ║     SignalScope — Stock Scanner        ║")
-print("  ╚═══════════════════════════════════════╝")
+print("  ╔═══════════════════════════════════════════╗")
+print("  ║  SignalScope v4.0 — Multi-Market Scanner  ║")
+print("  ╠═══════════════════════════════════════════╣")
+print("  ║  Markets: NIFTY 500 + NASDAQ 100          ║")
+print("  ╚═══════════════════════════════════════════╝")
 print()
 
 ok = initialize()
@@ -24,8 +27,8 @@ ok = initialize()
 if not ok:
     print()
     print("  ⚠  Could not connect to Angel One.")
-    print("     Open http://localhost:5000 to see what's wrong.")
-    print("     Fix your .env file and restart.")
+    print("     NASDAQ scanning will still work via Yahoo Finance.")
+    print("     Fix your .env file and restart for Indian markets.")
     print()
 
 port = int(os.getenv("PORT", 5000))
