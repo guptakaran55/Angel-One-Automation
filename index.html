@@ -222,19 +222,36 @@ function IndexChart({market,overrideSymbol}){
     setSelIdx(overrideSymbol||mktConf.indices[0].symbol);
   },[market,overrideSymbol]);
 
+  var [chartError,setChartError]=useState(null);
+  var retryRef=useRef(null);
+
   useEffect(function(){
-    setLoading(true);
+    setLoading(true);setChartError(null);
     fetch(API+'/api/index_chart?index='+encodeURIComponent(selIdx)+'&resolution='+resolution+'&period='+period)
-      .then(function(r){
-        if(!r.ok){console.error('Chart API error:',r.status,r.statusText)}
-        return r.json()
-      })
+      .then(function(r){return r.json()})
       .then(function(d){
-        if(!d.error){setChartData(d)}
-        else{console.error('Chart data error:',d.error);setChartData(null)}
+        if(!d.error){setChartData(d);setChartError(null)}
+        else{
+          setChartData(null);
+          setChartError(d.error);
+          // Auto-retry every 15s up to 3 times if scan is blocking
+          var retryCount=0;
+          function retryChart(){
+            if(retryCount>=3)return;
+            retryCount++;
+            retryRef.current=setTimeout(function(){
+              fetch(API+'/api/index_chart?index='+encodeURIComponent(selIdx)+'&resolution='+resolution+'&period='+period)
+                .then(function(r2){return r2.json()})
+                .then(function(d2){if(!d2.error){setChartData(d2);setChartError(null)}else{retryChart()}})
+                .catch(function(){retryChart()});
+            },15000);
+          }
+          retryChart();
+        }
       })
-      .catch(function(e){console.error('Chart fetch failed:',e);setChartData(null)})
+      .catch(function(e){setChartData(null);setChartError('Network error')})
       .finally(function(){setLoading(false)});
+    return function(){if(retryRef.current)clearTimeout(retryRef.current)};
   },[selIdx,resolution,period]);
 
   // Draw chart on canvas
@@ -389,7 +406,10 @@ function IndexChart({market,overrideSymbol}){
         <div className="idx-stat"><span className="idx-stat-label">Data Points</span><span className="idx-stat-val">{chartData.data_points}</span></div>
       </div>
     </div>
-    :<div style={{height:'180px',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--t3)',fontSize:'12px'}}>Could not load chart data</div>}
+    :<div style={{height:'180px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',color:'var(--t3)',fontSize:'12px',gap:'6px'}}>
+      <span>{chartError||'Could not load chart data'}</span>
+      {chartError&&chartError.indexOf('scan')>=0&&<span style={{fontSize:'10px',color:'var(--am)'}}>Auto-retrying every 15s...</span>}
+    </div>}
   </div>;
 }
 

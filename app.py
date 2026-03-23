@@ -1057,28 +1057,50 @@ def api_stock_detail(symbol):
                 return jsonify(s)
     return jsonify({"error": "Not found"}), 404
 
+# ── Chart cache: avoids Yahoo rate limits during scans ──
+_chart_cache = {}  # key: "symbol|resolution|period" -> {"data": ..., "ts": timestamp}
+CHART_CACHE_TTL = 900  # 15 minutes
+
 @app.route("/api/index_chart")
 def api_index_chart():
-    """Fetch index chart data. Params: index (^NSEI, ^IXIC, ^NSEBANK), resolution (1d, 1wk, 1mo)"""
+    """Fetch index chart data with caching to avoid Yahoo rate limits during scans."""
     index_symbol = request.args.get("index", "^NSEI")
     resolution = request.args.get("resolution", "1d")
     period = request.args.get("period", "1y")
+    cache_key = f"{index_symbol}|{resolution}|{period}"
+
+    # Return cached data if fresh enough
+    cached = _chart_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < CHART_CACHE_TTL:
+        logger.info(f"Index chart cache hit: {index_symbol} (age {int(time.time() - cached['ts'])}s)")
+        return jsonify(cached["data"])
+
+    # Check if any scan is actively running — if so, don't hit Yahoo (will get rate limited)
+    if any(is_scanning.values()):
+        if cached:
+            # Return stale cache rather than nothing
+            logger.info(f"Index chart: scan running, returning stale cache for {index_symbol}")
+            return jsonify(cached["data"])
+        else:
+            logger.warning(f"Index chart: scan running, no cache for {index_symbol}")
+            return jsonify({"error": "Charts unavailable during scan. Will load after scan completes."}), 503
+
     logger.info(f"Index chart request: {index_symbol} res={resolution} period={period}")
-    # Retry up to 2 times — Render's outbound connections can be flaky on first attempt
     for attempt in range(2):
         try:
             data = fetch_index_chart_data(index_symbol, resolution, period)
             if data is not None:
                 logger.info(f"Index chart OK: {index_symbol} — {data.get('data_points', 0)} points")
+                _chart_cache[cache_key] = {"data": data, "ts": time.time()}
                 return jsonify(data)
             logger.warning(f"Index chart returned None for {index_symbol} (attempt {attempt+1})")
             if attempt == 0:
                 time.sleep(1)
         except Exception as e:
-            logger.error(f"Index chart error (attempt {attempt+1}) for {index_symbol}: {e}", exc_info=True)
+            logger.error(f"Index chart error (attempt {attempt+1}) for {index_symbol}: {e}")
             if attempt == 0:
                 time.sleep(1)
-    return jsonify({"error": "Could not fetch index data. Yahoo Finance may be temporarily unavailable."}), 500
+    return jsonify({"error": "Could not fetch index data. Try again when no scan is running."}), 500
 
 SECTOR_INDICES = [
     {"symbol": "^CNXBANK", "name": "NIFTY Bank", "sector": "Banking"},
@@ -1272,4 +1294,25 @@ def initialize():
 
     threading.Thread(target=scheduler, daemon=True).start()
     logger.info(f"Ready. NIFTY: {len(scan_instrument_list)} stocks, NASDAQ: {len(get_nasdaq100_symbols())} stocks")
+
+    # Pre-fetch index charts into cache so they're available during scans
+    def _prefetch_charts():
+        charts_to_prefetch = [
+            ("^NSEI", "1d", "1y"), ("^NSEI", "1d", "3mo"), ("^NSEI", "1d", "6mo"), ("^NSEI", "1d", "1mo"),
+            ("^NSEBANK", "1d", "1y"), ("^BSESN", "1d", "1y"),
+            ("^IXIC", "1d", "1y"), ("^IXIC", "1d", "3mo"),
+        ]
+        for sym, res, per in charts_to_prefetch:
+            try:
+                data = fetch_index_chart_data(sym, res, per)
+                if data:
+                    cache_key = f"{sym}|{res}|{per}"
+                    _chart_cache[cache_key] = {"data": data, "ts": time.time()}
+                    logger.info(f"Pre-cached chart: {sym} {per}")
+                time.sleep(0.3)  # gentle pacing to avoid rate limit
+            except Exception as e:
+                logger.debug(f"Pre-cache failed for {sym}: {e}")
+        logger.info(f"Chart pre-cache done: {len(_chart_cache)} charts cached")
+    threading.Thread(target=_prefetch_charts, daemon=True).start()
+
     return True
