@@ -116,9 +116,12 @@ def fetch_index_chart_data(index_symbol="^NSEI", resolution="1d", period="1y"):
         })
 
         ticker = yf.Ticker(index_symbol, session=session)
+        logger.info(f"yfinance: fetching {index_symbol} period={period} interval={interval}")
         df = ticker.history(period=period, interval=interval, auto_adjust=True)
+        logger.info(f"yfinance: {index_symbol} returned {len(df) if df is not None else 0} rows")
 
         if df is None or len(df) < 2:
+            logger.warning(f"yfinance: {index_symbol} returned insufficient data ({len(df) if df is not None else 0} rows)")
             return None
 
         df = df.dropna(subset=["Close"])
@@ -187,5 +190,5 @@ def fetch_index_chart_data(index_symbol="^NSEI", resolution="1d", period="1y"):
         }
 
     except Exception as e:
-        logger.error(f"Index chart error for {index_symbol}: {e}")
+        logger.error(f"Index chart error for {index_symbol}: {type(e).__name__}: {e}", exc_info=True)
         return None

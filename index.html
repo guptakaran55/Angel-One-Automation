@@ -225,9 +225,15 @@ function IndexChart({market,overrideSymbol}){
   useEffect(function(){
     setLoading(true);
     fetch(API+'/api/index_chart?index='+encodeURIComponent(selIdx)+'&resolution='+resolution+'&period='+period)
-      .then(function(r){return r.json()})
-      .then(function(d){if(!d.error)setChartData(d);else setChartData(null)})
-      .catch(function(){setChartData(null)})
+      .then(function(r){
+        if(!r.ok){console.error('Chart API error:',r.status,r.statusText)}
+        return r.json()
+      })
+      .then(function(d){
+        if(!d.error){setChartData(d)}
+        else{console.error('Chart data error:',d.error);setChartData(null)}
+      })
+      .catch(function(e){console.error('Chart fetch failed:',e);setChartData(null)})
       .finally(function(){setLoading(false)});
   },[selIdx,resolution,period]);
 

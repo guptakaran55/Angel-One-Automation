@@ -214,7 +214,7 @@ def fetch_candle_data(symbol_token):
         })
         if resp and resp.get("status") and resp.get("data"):
             df = pd.DataFrame(resp["data"], columns=["DateTime","Open","High","Low","Close","Volume"])
-            df["DateTime"] = pd.to_datetime(df["DateTime"])
+            df.loc[:, "DateTime"] = pd.to_datetime(df["DateTime"])
             df.set_index("DateTime", inplace=True)
             return df
         return None
@@ -1063,17 +1063,19 @@ def api_index_chart():
     index_symbol = request.args.get("index", "^NSEI")
     resolution = request.args.get("resolution", "1d")
     period = request.args.get("period", "1y")
+    logger.info(f"Index chart request: {index_symbol} res={resolution} period={period}")
     # Retry up to 2 times — Render's outbound connections can be flaky on first attempt
     for attempt in range(2):
         try:
             data = fetch_index_chart_data(index_symbol, resolution, period)
             if data is not None:
+                logger.info(f"Index chart OK: {index_symbol} — {data.get('data_points', 0)} points")
                 return jsonify(data)
+            logger.warning(f"Index chart returned None for {index_symbol} (attempt {attempt+1})")
             if attempt == 0:
-                logger.warning(f"Index chart attempt 1 failed for {index_symbol}, retrying...")
                 time.sleep(1)
         except Exception as e:
-            logger.error(f"Index chart error (attempt {attempt+1}): {e}")
+            logger.error(f"Index chart error (attempt {attempt+1}) for {index_symbol}: {e}", exc_info=True)
             if attempt == 0:
                 time.sleep(1)
     return jsonify({"error": "Could not fetch index data. Yahoo Finance may be temporarily unavailable."}), 500
