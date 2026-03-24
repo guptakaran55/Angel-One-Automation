@@ -85,64 +85,95 @@ def fetch_us_candle_data(symbol, period="2y"):
 
 def fetch_index_chart_data(index_symbol="^NSEI", resolution="1d", period="1y"):
     """
-    Fetch index chart data for display.
-    
-    Args:
-        index_symbol: Yahoo Finance symbol (^NSEI for Nifty, ^IXIC for NASDAQ, etc.)
-        resolution: "1d", "1wk", or "1mo"
-        period: "1mo", "3mo", "6mo", "1y", "2y", "5y"
-    
-    Returns dict with dates and values for charting.
+    Fetch index chart data using Yahoo Finance v8 chart API directly.
+    Bypasses yfinance library to avoid its aggressive rate-limit detection
+    (the _fetch_ticker_tz call that triggers YFRateLimitError).
     """
+    import requests as _req
+
+    valid_resolutions = {"1d": "1d", "1wk": "1wk", "1mo": "1mo"}
+    interval = valid_resolutions.get(resolution, "1d")
+
+    # Adjust period based on resolution
+    if interval == "1d" and period not in ["1mo", "3mo", "6mo", "1y"]:
+        period = "1y"
+    elif interval == "1wk" and period not in ["3mo", "6mo", "1y", "2y"]:
+        period = "1y"
+    elif interval == "1mo" and period not in ["1y", "2y", "5y"]:
+        period = "5y"
+
+    # Yahoo v8 chart API — no auth, no tz lookup, much less likely to rate-limit
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{index_symbol}"
+    params = {
+        "range": period,
+        "interval": interval,
+        "includePrePost": "false",
+        "events": "",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    }
+
     try:
-        import yfinance as yf
+        logger.info(f"Yahoo chart API: fetching {index_symbol} period={period} interval={interval}")
+        resp = _req.get(url, params=params, headers=headers, timeout=15)
 
-        valid_resolutions = {"1d": "1d", "1wk": "1wk", "1mo": "1mo"}
-        interval = valid_resolutions.get(resolution, "1d")
-
-        # Adjust period based on resolution to get sensible data
-        if interval == "1d" and period not in ["1mo", "3mo", "6mo", "1y"]:
-            period = "1y"
-        elif interval == "1wk" and period not in ["3mo", "6mo", "1y", "2y"]:
-            period = "1y"
-        elif interval == "1mo" and period not in ["1y", "2y", "5y"]:
-            period = "5y"
-
-        # Set custom headers to avoid Yahoo blocking server IPs
-        import requests as _req
-        session = _req.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0",
-        })
-
-        ticker = yf.Ticker(index_symbol, session=session)
-        logger.info(f"yfinance: fetching {index_symbol} period={period} interval={interval}")
-        df = ticker.history(period=period, interval=interval, auto_adjust=True)
-        logger.info(f"yfinance: {index_symbol} returned {len(df) if df is not None else 0} rows")
-
-        if df is None or len(df) < 2:
-            logger.warning(f"yfinance: {index_symbol} returned insufficient data ({len(df) if df is not None else 0} rows)")
+        if resp.status_code == 429:
+            logger.warning(f"Yahoo chart API rate limited for {index_symbol}")
+            return None
+        if resp.status_code != 200:
+            logger.warning(f"Yahoo chart API returned {resp.status_code} for {index_symbol}")
             return None
 
-        df = df.dropna(subset=["Close"])
+        data = resp.json()
+        chart = data.get("chart", {}).get("result", [])
+        if not chart:
+            logger.warning(f"Yahoo chart API: no result for {index_symbol}")
+            return None
 
-        # Calculate stats
-        latest = float(df["Close"].iloc[-1])
-        prev = float(df["Close"].iloc[-2]) if len(df) >= 2 else latest
-        first = float(df["Close"].iloc[0])
-        high_val = float(df["High"].max())
-        low_val = float(df["Low"].min())
+        result = chart[0]
+        timestamps = result.get("timestamp", [])
+        quote = result.get("indicators", {}).get("quote", [{}])[0]
+        closes_raw = quote.get("close", [])
+        highs_raw = quote.get("high", [])
+        lows_raw = quote.get("low", [])
+        volumes_raw = quote.get("volume", [])
+
+        if len(timestamps) < 2 or len(closes_raw) < 2:
+            logger.warning(f"Yahoo chart API: insufficient data for {index_symbol} ({len(timestamps)} points)")
+            return None
+
+        # Build clean arrays, skipping None values
+        from datetime import datetime
+        dates = []
+        closes = []
+        highs = []
+        lows = []
+        volumes = []
+        for i, ts in enumerate(timestamps):
+            c = closes_raw[i] if i < len(closes_raw) else None
+            if c is None:
+                continue
+            dates.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+            closes.append(round(float(c), 2))
+            highs.append(round(float(highs_raw[i] or c), 2))
+            lows.append(round(float(lows_raw[i] or c), 2))
+            volumes.append(int(volumes_raw[i] or 0))
+
+        if len(closes) < 2:
+            return None
+
+        latest = closes[-1]
+        prev = closes[-2]
+        first = closes[0]
+        high_val = max(highs)
+        low_val = min(lows)
         day_change = latest - prev
         day_change_pct = (day_change / prev * 100) if prev > 0 else 0
         period_change = latest - first
         period_change_pct = (period_change / first * 100) if first > 0 else 0
 
-        # Build chart data
-        dates = [d.strftime("%Y-%m-%d") for d in df.index]
-        closes = [round(float(v), 2) for v in df["Close"].values]
-        highs = [round(float(v), 2) for v in df["High"].values]
-        lows = [round(float(v), 2) for v in df["Low"].values]
-        volumes = [int(v) for v in df["Volume"].values]
+        logger.info(f"Yahoo chart API OK: {index_symbol} — {len(dates)} points")
 
         # Index metadata
         INDEX_META = {
@@ -153,7 +184,6 @@ def fetch_index_chart_data(index_symbol="^NSEI", resolution="1d", period="1y"):
             "^NDX": {"name": "NASDAQ 100", "currency": "$", "exchange": "NASDAQ"},
             "^GSPC": {"name": "S&P 500", "currency": "$", "exchange": "NYSE"},
             "^DJI": {"name": "Dow Jones", "currency": "$", "exchange": "NYSE"},
-            # Indian Sector Indices (Yahoo Finance tickers)
             "^CNXBANK": {"name": "NIFTY Bank", "currency": "₹", "exchange": "NSE", "sector": "Banking"},
             "^CNXIT": {"name": "NIFTY IT", "currency": "₹", "exchange": "NSE", "sector": "IT / Tech"},
             "^CNXPHARMA": {"name": "NIFTY Pharma", "currency": "₹", "exchange": "NSE", "sector": "Pharma"},
