@@ -62,11 +62,12 @@ credentials_ok = False
 last_login_attempt = 0
 login_backoff = 1
 
-current_pace = 0.35
-PACE_MIN = 0.35
-PACE_MAX = 2.0
-PACE_BACKOFF_MULT = 1.5
-PACE_RECOVERY_MULT = 0.9
+current_pace = 0.5
+PACE_MIN = 0.5
+PACE_MAX = 8.0
+PACE_BACKOFF_MULT = 2.0
+PACE_RECOVERY_MULT = 0.95
+MAX_RETRIES_PER_STOCK = 2
 
 # ── Multi-market scan results ──
 scan_progress = {
@@ -717,6 +718,7 @@ def run_nifty_scan():
     portfolio = fetch_portfolio()
     ptokens = {h["token"] for h in portfolio}
     consecutive_errors = 0
+    retry_queue = []  # stocks that got rate-limited, will retry at end
 
     for i, inst in enumerate(scan_instrument_list):
         if abort_scan["nifty500"]: break
@@ -727,20 +729,27 @@ def run_nifty_scan():
         scan_progress[mkt]["current"] = i + 1
         scan_progress[mkt]["pace"] = round(current_pace, 2)
 
-        if consecutive_errors >= 50:
-            scan_progress[mkt]["rate_limited"] = True
+        if consecutive_errors >= 80:
+            # Queue remaining stocks for retry instead of aborting
+            for j in range(i, len(scan_instrument_list)):
+                retry_queue.append(scan_instrument_list[j])
+            logger.warning(f"NIFTY scan: {consecutive_errors} consecutive errors, queued {len(scan_instrument_list) - i} stocks for retry")
             break
 
         try:
             result = fetch_candle_data(token)
             if result is RATE_LIMITED:
                 consecutive_errors += 1
-                errs.append({"symbol": sym, "error": "Rate limited"})
+                retry_queue.append(inst)  # queue for retry instead of skipping
                 scan_progress[mkt]["errors"] = len(errs)
                 current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
-                time.sleep(5)
-                try: create_session()
-                except: pass
+                # Progressive backoff: wait longer as errors accumulate
+                wait = min(3 + consecutive_errors * 0.5, 15)
+                time.sleep(wait)
+                # Re-auth every 30 consecutive errors
+                if consecutive_errors % 30 == 0:
+                    try: create_session(); time.sleep(2)
+                    except: pass
                 continue
 
             if result is None:
@@ -789,6 +798,7 @@ def run_nifty_scan():
             if "rate" in err_str.lower() or "timeout" in err_str.lower():
                 consecutive_errors += 1
                 current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
+                retry_queue.append(inst)
                 time.sleep(3)
             else:
                 consecutive_errors = 0
@@ -796,6 +806,54 @@ def run_nifty_scan():
         if (i+1) % 150 == 0:
             try: create_session(); time.sleep(1)
             except: pass
+
+    # ── Retry phase: process rate-limited stocks with generous pacing ──
+    if retry_queue and not abort_scan["nifty500"]:
+        already_scanned = {s["token"] for s in all_s}
+        retry_queue = [inst for inst in retry_queue if inst["token"] not in already_scanned]
+        if retry_queue:
+            logger.info(f"NIFTY retry phase: {len(retry_queue)} stocks, waiting 10s for rate limit to cool...")
+            time.sleep(10)
+            try: create_session()
+            except: pass
+
+            retry_pace = 1.5  # much slower for retries
+            retry_errors = 0
+            for inst in retry_queue:
+                if abort_scan["nifty500"] or retry_errors >= 20: break
+                sym, token = inst["symbol"], inst["token"]
+                name = inst.get("name", sym.replace("-EQ",""))
+                clean = sym.replace("-EQ","")
+                scan_progress[mkt]["current"] += 1
+
+                try:
+                    result = fetch_candle_data(token)
+                    if result is RATE_LIMITED or result is None:
+                        retry_errors += 1
+                        errs.append({"symbol": sym, "error": "Rate limited (retry)"})
+                        scan_progress[mkt]["errors"] = len(errs)
+                        time.sleep(min(5 + retry_errors, 15))
+                        continue
+
+                    df = result
+                    if len(df) < 50: continue
+                    a = analyze_stock(df, currency_symbol="₹")
+                    if a is None: continue
+
+                    retry_errors = 0
+                    indices = get_tags_for(clean, INDEX_TAGS)
+                    stock = {"symbol": sym, "name": name, "token": token,
+                             "in_portfolio": token in ptokens, "indices": indices, "market": "nifty500", **a}
+                    all_s.append(stock)
+                    scan_progress[mkt]["ok"] = len(all_s)
+                    if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
+                    if (a["is_sell"] or a["is_moderate_sell"]) and token in ptokens: sells.append(stock)
+                    time.sleep(retry_pace)
+                except Exception:
+                    retry_errors += 1
+                    time.sleep(3)
+
+            logger.info(f"NIFTY retry phase done: recovered {len(all_s)} total stocks")
 
     elapsed = time.time() - t0
     scan_results[mkt] = {
@@ -825,10 +883,12 @@ def run_nasdaq_scan():
 
     symbols = get_nasdaq100_symbols()
     total = len(symbols)
-    scan_progress[mkt] = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": 0.5}
+    scan_progress[mkt] = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": 0.6}
     logger.info(f"Starting NASDAQ scan: {total} stocks")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
+    retry_queue = []
+    consecutive_rl = 0
 
     for i, sym in enumerate(symbols):
         if abort_scan["nasdaq100"]: break
@@ -837,10 +897,14 @@ def run_nasdaq_scan():
         try:
             df = fetch_us_candle_data(sym)
             if df is US_RATE_LIMITED:
-                errs.append({"symbol": sym, "error": "Rate limited"})
+                consecutive_rl += 1
+                retry_queue.append(sym)
                 scan_progress[mkt]["errors"] = len(errs)
-                time.sleep(5)
+                wait = min(3 + consecutive_rl * 1.0, 15)
+                time.sleep(wait)
                 continue
+
+            consecutive_rl = 0
 
             if df is None or len(df) < 50:
                 scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
@@ -867,10 +931,42 @@ def run_nasdaq_scan():
                     "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
                 })
 
-            time.sleep(0.4)  # gentle pacing for Yahoo
+            time.sleep(0.6)  # pacing for Yahoo
         except Exception as e:
             errs.append({"symbol": sym, "error": str(e)})
             scan_progress[mkt]["errors"] = len(errs)
+            retry_queue.append(sym)
+
+    # ── Retry phase for rate-limited NASDAQ stocks ──
+    if retry_queue and not abort_scan["nasdaq100"]:
+        already = {s["symbol"] for s in all_s}
+        retry_queue = [s for s in retry_queue if s not in already]
+        if retry_queue:
+            logger.info(f"NASDAQ retry phase: {len(retry_queue)} stocks, cooling 10s...")
+            time.sleep(10)
+            retry_errors = 0
+            for sym in retry_queue:
+                if abort_scan["nasdaq100"] or retry_errors >= 15: break
+                try:
+                    df = fetch_us_candle_data(sym)
+                    if df is US_RATE_LIMITED or df is None or len(df) < 50:
+                        retry_errors += 1
+                        time.sleep(min(5 + retry_errors, 15))
+                        continue
+                    a = analyze_stock(df, currency_symbol="$", min_avg_volume=50000)
+                    if a is None: continue
+                    retry_errors = 0
+                    stock = {"symbol": sym, "name": sym, "token": sym,
+                             "in_portfolio": False, "indices": ["NASDAQ 100"], "market": "nasdaq100", **a}
+                    all_s.append(stock)
+                    scan_progress[mkt]["ok"] = len(all_s)
+                    if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
+                    if a["is_sell"] or a["is_moderate_sell"]: sells.append(stock)
+                    time.sleep(1.5)
+                except Exception:
+                    retry_errors += 1
+                    time.sleep(3)
+            logger.info(f"NASDAQ retry done: {len(all_s)} total stocks")
 
     elapsed = time.time() - t0
     scan_results[mkt] = {
