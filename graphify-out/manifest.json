@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "created_at": "2026-04-22T06:00:25.600534",
+  "corpus": {
+    "total_files": 9,
+    "total_words": 16910
+  },
+  "graph": {
+    "nodes": 141,
+    "edges": 208,
+    "communities": 19
+  },
+  "outputs": {
+    "html": "graph.html",
+    "json": "graph.json",
+    "report": "GRAPH_REPORT.md",
+    "obsidian": "obsidian/"
+  }
+}

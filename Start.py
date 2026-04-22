@@ -1,5 +1,5 @@
 """
-SignalScope v4.0 — Multi-Market Edition
+SignalScope v4.1 — Multi-Market Edition
 Run this file to start.
 
 Usage:
@@ -16,20 +16,14 @@ from app import app, initialize
 
 print()
 print("  ╔═══════════════════════════════════════════╗")
-print("  ║  SignalScope v4.0 — Multi-Market Scanner  ║")
+print("  ║  SignalScope v4.1 — Multi-Market Scanner  ║")
 print("  ╠═══════════════════════════════════════════╣")
 print("  ║  Markets: NIFTY 500 + NASDAQ 100          ║")
+print("  ║  Data: Yahoo Finance (no API key needed)  ║")
 print("  ╚═══════════════════════════════════════════╝")
 print()
 
-ok = initialize()
-
-if not ok:
-    print()
-    print("  ⚠  Could not connect to Angel One.")
-    print("     NASDAQ scanning will still work via Yahoo Finance.")
-    print("     Fix your .env file and restart for Indian markets.")
-    print()
+initialize()
 
 port = int(os.getenv("PORT", 5000))
 print()

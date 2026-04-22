@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip uninstall:*)",
+      "Bash(python -c \"from dotenv import load_dotenv; load_dotenv\\(\\); from app import app, initialize; print\\(''Import OK''\\)\")",
+      "Bash(python -m pip install yfinance==0.2.54)",
+      "Bash(python -c \":*)",
+      "Bash(netstat -ano)",
+      "Bash(python -c \"import graphify\")",
+      "Bash(pip install *)",
+      "Bash(python -c \"import graphify; import sys; open\\('.graphify_python', 'w'\\).write\\(sys.executable\\)\")",
+      "Bash(python -c ' *)",
+      "Read(//c/Users/gupta/AppData/Local/Programs/Python/Python312/**)",
+      "Bash(cmd.exe /c \"python --version\")",
+      "Bash(cmd.exe /c \"cd /d \\\\\"C:\\\\Users\\\\gupta\\\\PycharmProjects\\\\HObBY PROJECTS\\\\Angel One Automation\\\\\" && python -c \\\\\"print\\('hello'\\)\\\\\"\")",
+      "PowerShell(python -c \"print\\('hello from python'\\)\")"
+    ]
+  }
+}

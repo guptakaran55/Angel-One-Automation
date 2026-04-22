@@ -1,25 +1,23 @@
 """
-SignalScope v4.0 — Multi-Market Edition
-Scans NIFTY 500 (Angel One) + NASDAQ 100 (Yahoo Finance)
+SignalScope v4.1 — Multi-Market Edition
+Scans NIFTY 500 (Yahoo Finance) + NASDAQ 100 (Yahoo Finance)
 Daily candles, 6 indicators, weighted scoring, index charts.
+No broker API credentials required for market data.
 
-v4.0 Changes:
-  - Multi-market support: NIFTY 500 + NASDAQ 100
-  - Index chart endpoint with 1D/1W/1M resolution
-  - Parallel market scanning via ThreadPoolExecutor
-  - yfinance integration for US market data
-  - Market switcher in frontend
-  - All v3.1 features preserved
+v4.1 Changes:
+  - Replaced Angel One API with Yahoo Finance for NIFTY 500 data
+  - Indian stocks fetched via yfinance using SYMBOL.NS tickers
+  - Portfolio data sourced from Zerodha only
+  - No API keys or credentials needed for scanning
 """
 
 import os, time, threading, logging, hashlib, json
 from datetime import datetime, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import numpy as np, pandas as pd, pyotp, requests
+import numpy as np, pandas as pd, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from SmartApi import SmartConnect
 from index_data import get_scan_universe, build_index_tags, get_tags_for
 from us_market import (
     get_nasdaq100_symbols, fetch_us_candle_data, fetch_index_chart_data,
@@ -32,10 +30,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
 
-API_KEY    = os.getenv("ANGEL_API_KEY", "")
-CLIENT_ID  = os.getenv("ANGEL_CLIENT_ID", "")
-PASSWORD   = os.getenv("ANGEL_PASSWORD", "")
-TOTP_TOKEN = os.getenv("ANGEL_TOTP_TOKEN", "")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 
 MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
@@ -52,15 +46,9 @@ zerodha_user = None
 INDEX_TAGS = build_index_tags()
 SCAN_UNIVERSE = set()
 
-smart_api = None
-refresh_token = None
-instrument_list = []
 scan_instrument_list = []
 is_scanning = {"nifty500": False, "nasdaq100": False}
 abort_scan = {"nifty500": False, "nasdaq100": False}
-credentials_ok = False
-last_login_attempt = 0
-login_backoff = 1
 
 current_pace = 0.5
 PACE_MIN = 0.5
@@ -90,155 +78,115 @@ scan_results = {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# AUTH (Angel One)
+# INSTRUMENTS — built from NIFTY 500 universe (no broker API needed)
 # ═══════════════════════════════════════════════════════════════
 
-def check_credentials():
-    missing = []
-    if not API_KEY: missing.append("ANGEL_API_KEY")
-    if not CLIENT_ID: missing.append("ANGEL_CLIENT_ID")
-    if not PASSWORD: missing.append("ANGEL_PASSWORD")
-    if not TOTP_TOKEN: missing.append("ANGEL_TOTP_TOKEN")
-    return missing
-
-def create_session():
-    global smart_api, refresh_token, credentials_ok, last_login_attempt, login_backoff
-    try:
-        smart_api = SmartConnect(api_key=API_KEY)
-        totp = pyotp.TOTP(TOTP_TOKEN).now()
-        data = smart_api.generateSession(CLIENT_ID, PASSWORD, totp)
-        if not data or data.get("status") is False:
-            logger.error(f"Login failed: {data}")
-            credentials_ok = False
-            return False
-        refresh_token = data["data"]["refreshToken"]
-        credentials_ok = True
-        login_backoff = 1
-        logger.info("Logged in to Angel One")
-        return True
-    except Exception as e:
-        logger.error(f"Login error: {e}")
-        credentials_ok = False
-        return False
-
-def ensure_session():
-    global last_login_attempt, login_backoff, scan_progress
-    if smart_api is None:
-        return create_session()
-    try:
-        smart_api.getProfile(refresh_token)
-        return True
-    except:
-        now = time.time()
-        if now - last_login_attempt < login_backoff:
-            return False
-        last_login_attempt = now
-        result = create_session()
-        if not result:
-            login_backoff = min(login_backoff * 2, 60)
-            scan_progress["nifty500"]["rate_limited"] = True
-            logger.warning(f"Login failed, backing off {login_backoff}s")
-        else:
-            login_backoff = 1
-            scan_progress["nifty500"]["rate_limited"] = False
-        return result
-
-# ═══════════════════════════════════════════════════════════════
-# INSTRUMENTS
-# ═══════════════════════════════════════════════════════════════
-
-def fetch_instrument_list():
-    """Download NSE instruments from Angel One, filter to NIFTY 500 universe."""
-    global instrument_list, scan_instrument_list, SCAN_UNIVERSE
-    import urllib.request, ssl
+def load_instrument_list():
+    """Build NIFTY 500 scan list from index_data. Each stock mapped to a Yahoo Finance ticker."""
+    global scan_instrument_list, SCAN_UNIVERSE
     try:
         SCAN_UNIVERSE = get_scan_universe()
-        url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        all_inst = None
-
-        for attempt in range(1, 4):
-            try:
-                logger.info(f"Downloading Angel One instrument list (attempt {attempt}/3)...")
-                ctx = ssl.create_default_context()
-                req = urllib.request.Request(url, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0",
-                    "Accept": "application/json",
-                })
-                with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-                    raw = resp.read()
-                logger.info(f"Downloaded {len(raw)/1024/1024:.1f} MB. Parsing JSON...")
-                all_inst = json.loads(raw)
-                logger.info(f"Parsed {len(all_inst)} instruments")
-                break
-            except Exception as e:
-                logger.warning(f"Attempt {attempt} failed: {e}")
-                if attempt < 3:
-                    time.sleep(5 * attempt)
-
-        if not all_inst:
-            logger.error("Could not download instrument list after 3 attempts.")
-            logger.error("NIFTY scan unavailable. NASDAQ scan still works.")
-            return False
-
-        instrument_list = [
-            i for i in all_inst
-            if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ")
-        ]
-        logger.info(f"Total NSE equities: {len(instrument_list)}")
-
         scan_instrument_list = [
-            i for i in instrument_list
-            if i["symbol"].replace("-EQ", "") in SCAN_UNIVERSE
+            {"symbol": sym + "-EQ", "name": sym, "yf_symbol": sym + ".NS"}
+            for sym in sorted(SCAN_UNIVERSE)
         ]
-        logger.info(f"Scan list: {len(scan_instrument_list)} stocks (NIFTY 500 universe)")
+        logger.info(f"Scan list: {len(scan_instrument_list)} stocks (NIFTY 500 universe via Yahoo Finance)")
         return True
     except Exception as e:
-        logger.error(f"Instrument fetch failed: {e}")
+        logger.error(f"Failed to load instrument list: {e}")
         return False
 
 # ═══════════════════════════════════════════════════════════════
-# DATA FETCH (Angel One)
+# DATA FETCH (Yahoo Finance — no credentials required)
 # ═══════════════════════════════════════════════════════════════
 
 RATE_LIMITED = "RATE_LIMITED"
 
-def fetch_candle_data(symbol_token):
-    if not ensure_session(): return RATE_LIMITED
+def fetch_candle_data(yf_symbol):
+    """
+    Fetch 2 years of daily OHLCV data from Yahoo Finance v8 chart API.
+    Uses direct HTTP (same approach as fetch_index_chart_data) for reliable 429 detection.
+    """
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_symbol}"
+    params = {"range": "2y", "interval": "1d", "includePrePost": "false", "events": ""}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0",
+    }
     try:
-        to_d = datetime.now()
-        from_d = to_d - timedelta(days=730)
-        resp = smart_api.getCandleData({
-            "exchange": "NSE", "symboltoken": str(symbol_token),
-            "interval": "ONE_DAY",
-            "fromdate": from_d.strftime("%Y-%m-%d %H:%M"),
-            "todate": to_d.strftime("%Y-%m-%d %H:%M"),
-        })
-        if resp and resp.get("status") and resp.get("data"):
-            df = pd.DataFrame(resp["data"], columns=["DateTime","Open","High","Low","Close","Volume"])
-            df.loc[:, "DateTime"] = pd.to_datetime(df["DateTime"])
-            df.set_index("DateTime", inplace=True)
-            return df
-        return None
-    except Exception as e:
-        err_str = str(e)
-        if "access rate" in err_str.lower() or "rate" in err_str.lower():
-            logger.warning(f"Rate limited on {symbol_token}")
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        if resp.status_code == 429:
+            logger.warning(f"Rate limited (429) on {yf_symbol}")
             return RATE_LIMITED
-        logger.debug(f"Candle error {symbol_token}: {e}")
+        if resp.status_code != 200:
+            logger.debug(f"HTTP {resp.status_code} for {yf_symbol}")
+            return None
+
+        data = resp.json()
+        chart = data.get("chart", {}).get("result", [])
+        if not chart:
+            return None
+
+        result = chart[0]
+        timestamps = result.get("timestamp", [])
+        quote = result.get("indicators", {}).get("quote", [{}])[0]
+        opens_raw  = quote.get("open", [])
+        highs_raw  = quote.get("high", [])
+        lows_raw   = quote.get("low", [])
+        closes_raw = quote.get("close", [])
+        vols_raw   = quote.get("volume", [])
+
+        if len(timestamps) < 10:
+            return None
+
+        rows = []
+        for i, ts in enumerate(timestamps):
+            c = closes_raw[i] if i < len(closes_raw) else None
+            if c is None:
+                continue
+            rows.append({
+                "DateTime": pd.Timestamp.utcfromtimestamp(ts).tz_localize(None),
+                "Open":   float(opens_raw[i]  or c),
+                "High":   float(highs_raw[i]  or c),
+                "Low":    float(lows_raw[i]   or c),
+                "Close":  float(c),
+                "Volume": int(vols_raw[i] or 0) if i < len(vols_raw) else 0,
+            })
+
+        if len(rows) < 50:
+            return None
+
+        df = pd.DataFrame(rows).set_index("DateTime")
+        return df
+
+    except Exception as e:
+        err_str = str(e).lower()
+        if "rate" in err_str or "too many" in err_str or "429" in err_str:
+            logger.warning(f"Rate limited on {yf_symbol}: {e}")
+            return RATE_LIMITED
+        logger.debug(f"Candle error {yf_symbol}: {e}")
         return None
 
 def fetch_portfolio():
-    if not ensure_session(): return []
-    try:
-        result = smart_api.holding()
-        if result and result.get("status") and result.get("data"):
-            return [{"symbol": h.get("tradingsymbol",""), "token": h.get("symboltoken",""),
-                      "quantity": h.get("quantity",0), "avg_price": float(h.get("averageprice",0)),
-                      "ltp": float(h.get("ltp",0)), "pnl": float(h.get("profitandloss",0))}
-                     for h in result["data"]]
+    """Fetch holdings from Zerodha. Returns list of dicts with tradingsymbol."""
+    if not zerodha_access_token or not ZERODHA_API_KEY:
         return []
+    try:
+        resp = requests.get(
+            "https://api.kite.trade/portfolio/holdings",
+            headers={"Authorization": f"token {ZERODHA_API_KEY}:{zerodha_access_token}"},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("status") != "success":
+            return []
+        return [
+            {"symbol": h.get("tradingsymbol", ""), "quantity": h.get("quantity", 0),
+             "avg_price": float(h.get("average_price", 0)), "ltp": float(h.get("last_price", 0)),
+             "pnl": float(h.get("pnl", 0))}
+            for h in data.get("data", []) if h.get("quantity", 0) > 0
+        ]
     except Exception as e:
-        logger.error(f"Portfolio error: {e}")
+        logger.error(f"Portfolio fetch error: {e}")
         return []
 
 # ═══════════════════════════════════════════════════════════════
@@ -692,14 +640,11 @@ def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
     }
 
 # ═══════════════════════════════════════════════════════════════
-# SCAN — NIFTY 500 (Angel One)
+# SCAN — NIFTY 500 (Yahoo Finance)
 # ═══════════════════════════════════════════════════════════════
 
 def run_nifty_scan():
     global scan_results, scan_progress, current_pace
-    if not credentials_ok:
-        logger.error("Cannot scan NIFTY — not logged in")
-        return
     if is_scanning["nifty500"]:
         logger.warning("NIFTY scan already running")
         return
@@ -711,18 +656,18 @@ def run_nifty_scan():
 
     total = len(scan_instrument_list)
     scan_progress[mkt] = {"current": 0, "total": total, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False, "pace": current_pace}
-    logger.info(f"Starting NIFTY scan: {total} stocks")
+    logger.info(f"Starting NIFTY scan: {total} stocks via Yahoo Finance")
     t0 = time.time()
     buys, sells, all_s, errs = [], [], [], []
 
     portfolio = fetch_portfolio()
-    ptokens = {h["token"] for h in portfolio}
+    psymbols = {h["symbol"] for h in portfolio}
     consecutive_errors = 0
     retry_queue = []  # stocks that got rate-limited, will retry at end
 
     for i, inst in enumerate(scan_instrument_list):
         if abort_scan["nifty500"]: break
-        sym, token = inst["symbol"], inst["token"]
+        sym, yf_sym = inst["symbol"], inst["yf_symbol"]
         name = inst.get("name", sym.replace("-EQ",""))
         clean = sym.replace("-EQ","")
 
@@ -730,57 +675,55 @@ def run_nifty_scan():
         scan_progress[mkt]["pace"] = round(current_pace, 2)
 
         if consecutive_errors >= 80:
-            # Queue remaining stocks for retry instead of aborting
             for j in range(i, len(scan_instrument_list)):
                 retry_queue.append(scan_instrument_list[j])
             logger.warning(f"NIFTY scan: {consecutive_errors} consecutive errors, queued {len(scan_instrument_list) - i} stocks for retry")
             break
 
         try:
-            result = fetch_candle_data(token)
+            result = fetch_candle_data(yf_sym)
             if result is RATE_LIMITED:
                 consecutive_errors += 1
-                retry_queue.append(inst)  # queue for retry instead of skipping
+                retry_queue.append(inst)
                 scan_progress[mkt]["errors"] = len(errs)
                 current_pace = min(current_pace * PACE_BACKOFF_MULT, PACE_MAX)
-                # Progressive backoff: wait longer as errors accumulate
                 wait = min(3 + consecutive_errors * 0.5, 15)
                 time.sleep(wait)
-                # Re-auth every 30 consecutive errors
-                if consecutive_errors % 30 == 0:
-                    try: create_session(); time.sleep(2)
-                    except: pass
                 continue
 
             if result is None:
                 scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
                 consecutive_errors = 0
                 current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
+                time.sleep(current_pace)  # always pace — even for no-data stocks
                 continue
 
             df = result
             if len(df) < 50:
                 scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
                 consecutive_errors = 0; current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
+                time.sleep(current_pace)
                 continue
 
             a = analyze_stock(df, currency_symbol="₹")
             if a is None:
                 scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
                 consecutive_errors = 0; current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
+                time.sleep(current_pace)
                 continue
 
             consecutive_errors = 0
             current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
 
             indices = get_tags_for(clean, INDEX_TAGS)
-            stock = {"symbol": sym, "name": name, "token": token,
-                     "in_portfolio": token in ptokens, "indices": indices, "market": "nifty500", **a}
+            in_portfolio = clean in psymbols
+            stock = {"symbol": sym, "name": name, "token": yf_sym,
+                     "in_portfolio": in_portfolio, "indices": indices, "market": "nifty500", **a}
             all_s.append(stock)
             scan_progress[mkt]["ok"] = len(all_s)
 
             if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
-            if (a["is_sell"] or a["is_moderate_sell"]) and token in ptokens: sells.append(stock)
+            if (a["is_sell"] or a["is_moderate_sell"]) and in_portfolio: sells.append(stock)
 
             if len(all_s) % 10 == 0:
                 scan_results[mkt].update({
@@ -803,31 +746,25 @@ def run_nifty_scan():
             else:
                 consecutive_errors = 0
 
-        if (i+1) % 150 == 0:
-            try: create_session(); time.sleep(1)
-            except: pass
-
     # ── Retry phase: process rate-limited stocks with generous pacing ──
     if retry_queue and not abort_scan["nifty500"]:
         already_scanned = {s["token"] for s in all_s}
-        retry_queue = [inst for inst in retry_queue if inst["token"] not in already_scanned]
+        retry_queue = [inst for inst in retry_queue if inst["yf_symbol"] not in already_scanned]
         if retry_queue:
             logger.info(f"NIFTY retry phase: {len(retry_queue)} stocks, waiting 10s for rate limit to cool...")
             time.sleep(10)
-            try: create_session()
-            except: pass
 
-            retry_pace = 1.5  # much slower for retries
+            retry_pace = 1.5
             retry_errors = 0
             for inst in retry_queue:
                 if abort_scan["nifty500"] or retry_errors >= 20: break
-                sym, token = inst["symbol"], inst["token"]
+                sym, yf_sym = inst["symbol"], inst["yf_symbol"]
                 name = inst.get("name", sym.replace("-EQ",""))
                 clean = sym.replace("-EQ","")
                 scan_progress[mkt]["current"] += 1
 
                 try:
-                    result = fetch_candle_data(token)
+                    result = fetch_candle_data(yf_sym)
                     if result is RATE_LIMITED or result is None:
                         retry_errors += 1
                         errs.append({"symbol": sym, "error": "Rate limited (retry)"})
@@ -842,12 +779,13 @@ def run_nifty_scan():
 
                     retry_errors = 0
                     indices = get_tags_for(clean, INDEX_TAGS)
-                    stock = {"symbol": sym, "name": name, "token": token,
-                             "in_portfolio": token in ptokens, "indices": indices, "market": "nifty500", **a}
+                    in_portfolio = clean in psymbols
+                    stock = {"symbol": sym, "name": name, "token": yf_sym,
+                             "in_portfolio": in_portfolio, "indices": indices, "market": "nifty500", **a}
                     all_s.append(stock)
                     scan_progress[mkt]["ok"] = len(all_s)
                     if a["is_buy"] or a["is_moderate_buy"]: buys.append(stock)
-                    if (a["is_sell"] or a["is_moderate_sell"]) and token in ptokens: sells.append(stock)
+                    if (a["is_sell"] or a["is_moderate_sell"]) and in_portfolio: sells.append(stock)
                     time.sleep(retry_pace)
                 except Exception:
                     retry_errors += 1
@@ -990,7 +928,7 @@ def run_full_scan(markets=None):
         markets = ["nifty500", "nasdaq100"]
 
     threads = []
-    if "nifty500" in markets and credentials_ok and not is_scanning["nifty500"]:
+    if "nifty500" in markets and not is_scanning["nifty500"]:
         threads.append(threading.Thread(target=run_nifty_scan, daemon=True))
     if "nasdaq100" in markets and not is_scanning["nasdaq100"]:
         threads.append(threading.Thread(target=run_nasdaq_scan, daemon=True))
@@ -1042,20 +980,21 @@ def api_docs():
 
 @app.route("/api/status")
 def api_status():
+    instruments_loaded = len(scan_instrument_list) > 0
     return jsonify({
-        "connected": credentials_ok,
+        "connected": instruments_loaded,
         "instruments_scan": len(scan_instrument_list),
         "last_scan": scan_results.get("nifty500", {}).get("last_scan"),
         "scan_status": "scanning" if any(is_scanning.values()) else "idle",
         "is_scanning": any(is_scanning.values()),
         "is_scanning_per_market": is_scanning,
-        "missing": check_credentials(),
+        "missing": [],
         "zerodha_connected": zerodha_access_token is not None,
         "zerodha_user": zerodha_user.get("user_name","") if zerodha_user else "",
         "zerodha_configured": bool(ZERODHA_API_KEY and ZERODHA_API_SECRET),
         "login_url": f"https://kite.zerodha.com/connect/login?v=3&api_key={ZERODHA_API_KEY}" if ZERODHA_API_KEY else "",
         "markets": {
-            "nifty500": {"available": credentials_ok, "stocks": len(scan_instrument_list),
+            "nifty500": {"available": True, "stocks": len(scan_instrument_list),
                          "last_scan": scan_results["nifty500"].get("last_scan"),
                          "status": scan_results["nifty500"].get("status", "not_started")},
             "nasdaq100": {"available": True, "stocks": len(get_nasdaq100_symbols()),
@@ -1066,12 +1005,8 @@ def api_status():
 
 @app.route("/api/reconnect", methods=["POST"])
 def api_reconnect():
-    ok = create_session()
-    if ok:
-        if len(instrument_list) == 0:
-            fetch_instrument_list()
-        return jsonify({"status": "connected", "instruments_scan": len(scan_instrument_list)})
-    return jsonify({"error": "Login failed. Check credentials or try again in a minute."}), 500
+    load_instrument_list()
+    return jsonify({"status": "ready", "instruments_scan": len(scan_instrument_list)})
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop_scan():
@@ -1105,10 +1040,9 @@ def api_reset():
         scan_progress[mkt] = {"current": 0, "total": 0, "ok": 0, "errors": 0, "skipped": 0, "rate_limited": False}
     for m in abort_scan:
         abort_scan[m] = False
-    create_session()
-    if len(instrument_list) == 0:
-        fetch_instrument_list()
-    return jsonify({"status": "reset", "connected": credentials_ok})
+    if len(scan_instrument_list) == 0:
+        load_instrument_list()
+    return jsonify({"status": "reset", "connected": len(scan_instrument_list) > 0})
 
 @app.route("/api/scan", methods=["POST"])
 def api_trigger_scan():
@@ -1118,11 +1052,8 @@ def api_trigger_scan():
         markets = [markets]
 
     if "nifty500" in markets:
-        if not credentials_ok:
-            if not create_session():
-                markets = [m for m in markets if m != "nifty500"]
         if len(scan_instrument_list) == 0:
-            fetch_instrument_list()
+            load_instrument_list()
 
     # Filter out markets already scanning
     already = [m for m in markets if is_scanning.get(m, False)]
@@ -1358,31 +1289,12 @@ def zerodha_holdings():
 # ═══════════════════════════════════════════════════════════════
 
 def initialize():
-    global credentials_ok
-    missing = check_credentials()
-    if missing:
-        logger.error(f"Missing env vars: {', '.join(missing)}")
-        credentials_ok = False
+    # Load NIFTY 500 universe from index_data (no broker credentials needed)
+    load_instrument_list()
+    if len(scan_instrument_list) > 0:
+        logger.info(f"Instruments loaded: {len(scan_instrument_list)} stocks (Yahoo Finance)")
     else:
-        if create_session():
-            # Run instrument download in background — poll for completion
-            # instead of Thread.join() which has a race condition on Windows/Python 3.12
-            logger.info("Loading instruments (max 90s, server starts regardless)...")
-            threading.Thread(target=fetch_instrument_list, daemon=True).start()
-
-            # Poll every 0.5s for up to 90s — check if instruments loaded
-            for _ in range(180):
-                if len(scan_instrument_list) > 0:
-                    break
-                time.sleep(0.5)
-
-            if len(scan_instrument_list) > 0:
-                logger.info(f"Instruments loaded: {len(scan_instrument_list)} stocks")
-            else:
-                logger.warning("Instrument download still running or failed — server starting anyway.")
-                logger.warning("NIFTY scan will work once instruments finish loading. NASDAQ works now.")
-        else:
-            logger.warning("Initial login failed — server starting anyway.")
+        logger.warning("Instrument load failed — NIFTY scan may be limited.")
 
     if zerodha_access_token and ZERODHA_API_KEY:
         if _verify_zerodha_token():
