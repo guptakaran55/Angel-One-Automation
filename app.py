@@ -56,9 +56,15 @@ MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
 APP_PASSWORD = os.getenv("APP_PASSWORD", "signal2026")
 
 # ── AI features (Value/AI scores are on-demand, not part of bulk scans) ──
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+# API keys must contain NO whitespace. Pasting a long sk-proj-… key into a host's
+# env-var field often injects a space/newline mid-string; .strip() only trims the
+# ends, so remove ALL whitespace to survive that.
+def _clean_key(name):
+    return "".join(os.getenv(name, "").split())
+
+OPENAI_API_KEY = _clean_key("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o").strip()
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_API_KEY = _clean_key("ANTHROPIC_API_KEY")
 AI_MODEL = os.getenv("AI_MODEL", "claude-sonnet-5").strip()
 # Provider: "openai" (ChatGPT) or "anthropic" (Claude). Auto-picks from whichever
 # key is present if unset; defaults to OpenAI otherwise.
@@ -72,6 +78,17 @@ def ai_is_enabled():
 
 def ai_active_model():
     return OPENAI_MODEL if AI_PROVIDER == "openai" else AI_MODEL
+
+def _mask_key(k):
+    """Safe fingerprint for logs — never prints the secret itself."""
+    if not k:
+        return "MISSING"
+    return f"len={len(k)} {k[:8]}…{k[-4:]}"
+
+# Compare this line in your Render logs against your local run: if the length or
+# the …last4 differ, the key stored on the host is corrupted/truncated/stale.
+logger.info("AI config -> provider=%s model=%s | OPENAI[%s] ANTHROPIC[%s]",
+            AI_PROVIDER, ai_active_model(), _mask_key(OPENAI_API_KEY), _mask_key(ANTHROPIC_API_KEY))
 
 # Zerodha
 ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
