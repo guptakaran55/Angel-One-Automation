@@ -445,6 +445,18 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
   var [aiPB,setAiPB]=useState(null),[aiPBLoad,setAiPBLoad]=useState(false),[aiPBErr,setAiPBErr]=useState(null);
   var [aiOL,setAiOL]=useState(null),[aiOLLoad,setAiOLLoad]=useState(false),[aiOLErr,setAiOLErr]=useState(null);
   useEffect(function(){fetch(API+'/api/ai/config').then(function(r){return r.json()}).then(function(d){setAiEnabled(!!d.ai_enabled);if(d.provider)setAiProvider(d.provider)}).catch(function(){})},[]);
+  // Auto-fire the AI pullback analysis when a DEEP pullback stock's detail opens
+  // (price >3% below EMA21) — matches the Android app (no button, cached per symbol).
+  useEffect(function(){
+    if(!s||!aiEnabled)return;
+    var d=s.ema21_pct_diff;
+    if(typeof d==='number'&&d<-3&&!aiPB&&!aiPBLoad){
+      setAiPBLoad(true);setAiPBErr(null);
+      fetch(API+'/api/ai/pullback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s.symbol,market:s.market})})
+        .then(function(r){return r.json()}).then(function(x){if(x.error)setAiPBErr(x.error);else setAiPB(x.analysis)})
+        .catch(function(){setAiPBErr('Network error')}).finally(function(){setAiPBLoad(false)});
+    }
+  },[aiEnabled]);
   if(!s)return null;
   var sym=s.symbol,mkt=s.market||'';
   var loadValue=function(){setValLoading(true);setValErr(null);fetch(API+'/api/value?symbol='+encodeURIComponent(sym)+'&market='+mkt).then(function(r){return r.json()}).then(function(d){if(d.error)setValErr(d.error);else setValData(d)}).catch(function(){setValErr('Network error')}).finally(function(){setValLoading(false)})};
@@ -810,18 +822,6 @@ function App(){
       }).catch(function(){setAuthErr('Network error')}).finally(function(){setAuthBusy(false)});
   };
 
-  if(!authed)return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg)',fontFamily:"'DM Sans',sans-serif"}}>
-    <div style={{background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'14px',padding:'36px 32px',maxWidth:'340px',width:'100%',boxShadow:'0 4px 24px rgba(0,0,0,.08)',textAlign:'center'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',marginBottom:'20px'}}>
-        <div className="lic">S</div><span style={{fontSize:'18px',fontWeight:800}}>SignalScope</span>
-      </div>
-      <div style={{fontSize:'13px',color:'var(--t3)',marginBottom:'20px'}}>Enter access password</div>
-      <input type="password" value={authPwd} onChange={function(e){setAuthPwd(e.target.value)}} onKeyDown={function(e){if(e.key==='Enter')doAuth()}} placeholder="Password" autoFocus style={{width:'100%',padding:'10px 14px',borderRadius:'8px',border:'1px solid var(--bd)',fontSize:'14px',background:'var(--bg)',color:'var(--t1)',marginBottom:'12px',textAlign:'center',fontFamily:"'JetBrains Mono',monospace"}}/>
-      <button onClick={doAuth} disabled={authBusy} style={{width:'100%',padding:'10px',borderRadius:'8px',border:'none',background:'linear-gradient(135deg,#3b82f6,#6366f1)',color:'#fff',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:authBusy?.6:1}}>{authBusy?'Verifying...':'Unlock'}</button>
-      {authErr&&<div style={{marginTop:'10px',fontSize:'12px',color:'var(--rd)'}}>{authErr}</div>}
-    </div>
-  </div>;
-
   var setAndSaveWL=function(w){setWatchlists(w);saveWL(w)};
   var createWL=function(name){if(!name.trim())return;var w=Object.assign({},watchlists);w[name.trim()]=[];setAndSaveWL(w);setAddingWL(false);setNewWLName('')};
   var deleteWL=function(name){var w=Object.assign({},watchlists);delete w[name];setAndSaveWL(w);if(activeWL===name)setActiveWL(null)};
@@ -930,6 +930,20 @@ function App(){
   var nT=allStocks.length;
   var nP=allStocks.filter(function(s){return s.in_portfolio}).length;
   var nSetups=allStocks.filter(matchSetup).length;
+
+  // Auth gate — MUST come after ALL hooks above (moving it earlier makes the
+  // hook count change when authed flips false→true on login → React error #310).
+  if(!authed)return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg)',fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'14px',padding:'36px 32px',maxWidth:'340px',width:'100%',boxShadow:'0 4px 24px rgba(0,0,0,.08)',textAlign:'center'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',marginBottom:'20px'}}>
+        <div className="lic">S</div><span style={{fontSize:'18px',fontWeight:800}}>SignalScope</span>
+      </div>
+      <div style={{fontSize:'13px',color:'var(--t3)',marginBottom:'20px'}}>Enter access password</div>
+      <input type="password" value={authPwd} onChange={function(e){setAuthPwd(e.target.value)}} onKeyDown={function(e){if(e.key==='Enter')doAuth()}} placeholder="Password" autoFocus style={{width:'100%',padding:'10px 14px',borderRadius:'8px',border:'1px solid var(--bd)',fontSize:'14px',background:'var(--bg)',color:'var(--t1)',marginBottom:'12px',textAlign:'center',fontFamily:"'JetBrains Mono',monospace"}}/>
+      <button onClick={doAuth} disabled={authBusy} style={{width:'100%',padding:'10px',borderRadius:'8px',border:'none',background:'linear-gradient(135deg,#3b82f6,#6366f1)',color:'#fff',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:authBusy?.6:1}}>{authBusy?'Verifying...':'Unlock'}</button>
+      {authErr&&<div style={{marginTop:'10px',fontSize:'12px',color:'var(--rd)'}}>{authErr}</div>}
+    </div>
+  </div>;
 
   if(loading&&!data)return <div className="ld"><div className="sp"/>Connecting...</div>;
 
@@ -1176,7 +1190,7 @@ function App(){
       </div>
       </React.Fragment>}
     </main>
-    {sel && <Modal s={sel} onClose={function(){setSel(null)}} watchlists={watchlists} onAddToWL={toggleInWL} isGolden={goldenMatch(sel)}/>}
+    {sel && <Modal key={sel.symbol} s={sel} onClose={function(){setSel(null)}} watchlists={watchlists} onAddToWL={toggleInWL} isGolden={goldenMatch(sel)}/>}
   </div>;
 }
 

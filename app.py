@@ -769,6 +769,8 @@ def run_nifty_scan():
             consecutive_errors = 0
             current_pace = max(current_pace * PACE_RECOVERY_MULT, PACE_MIN)
 
+            attach_value_score(a, yf_sym)  # inline value, alongside the technical scores
+
             indices = get_tags_for(clean, INDEX_TAGS)
             in_portfolio = clean in psymbols
             stock = {"symbol": sym, "name": name, "token": yf_sym,
@@ -907,6 +909,8 @@ def run_nasdaq_scan():
             if a is None:
                 scan_progress[mkt]["skipped"] = scan_progress[mkt].get("skipped", 0) + 1
                 continue
+
+            attach_value_score(a, sym)  # inline value, alongside the technical scores
 
             stock = {"symbol": sym, "name": sym, "token": sym,
                      "in_portfolio": False, "indices": ["NASDAQ 100"], "market": "nasdaq100", **a}
@@ -1052,54 +1056,115 @@ def _find_scan_stock(symbol, market=None):
                 return s, mkt
     return None, market
 
+# ── Yahoo quoteSummary access (direct, lightweight — NOT yfinance.info) ──
+# yfinance.Ticker().info does a per-call auth handshake + a huge multi-module
+# payload and rate-limits almost immediately. Instead we do the cookie+crumb
+# handshake ONCE, cache it, and issue a single quoteSummary GET per stock — the
+# same fast, reliable pattern the app already uses for chart data.
+_YF_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+_yahoo_lock = threading.Lock()
+_yahoo = {"session": None, "crumb": None}
+
+def _yahoo_session(force=False):
+    """Return (session, crumb), doing the fc.yahoo.com cookie + getcrumb handshake once."""
+    with _yahoo_lock:
+        if not force and _yahoo["session"] is not None and _yahoo["crumb"]:
+            return _yahoo["session"], _yahoo["crumb"]
+        s = requests.Session()
+        s.headers.update({"User-Agent": _YF_UA, "Accept": "*/*"})
+        try:
+            try:
+                s.get("https://fc.yahoo.com", timeout=10)  # sets the A3 cookie (may 404 — that's fine)
+            except Exception:
+                pass
+            for host in ("query1", "query2"):
+                crumb = s.get(f"https://{host}.finance.yahoo.com/v1/test/getcrumb", timeout=10).text.strip()
+                if crumb and "{" not in crumb and "<" not in crumb and len(crumb) < 40:
+                    _yahoo["session"], _yahoo["crumb"] = s, crumb
+                    return s, crumb
+        except Exception as e:
+            logger.debug(f"Yahoo crumb handshake failed: {e}")
+        return None, None
+
+_QS_MODULES = "financialData,defaultKeyStatistics,summaryDetail,assetProfile,price"
+
 def fetch_fundamentals(yf_ticker):
     """
-    Fetch Yahoo fundamentals via yfinance and normalize to scoring.value_score's
-    contract. Returns (fundamentals_dict, price, sector) or (None, None, None).
+    Fetch Yahoo fundamentals via a single direct quoteSummary call (shared crumb)
+    and normalize to scoring.value_score's contract.
+    Returns (fundamentals_dict, price, sector) or (None, None, None).
     """
+    def _do(session, crumb):
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{yf_ticker}"
+        return session.get(url, params={"modules": _QS_MODULES, "crumb": crumb}, timeout=12)
+
+    session, crumb = _yahoo_session()
+    if not session:
+        return None, None, None
     try:
-        import yfinance as yf
-        info = yf.Ticker(yf_ticker).info or {}
+        resp = _do(session, crumb)
+        if resp.status_code in (401, 403):  # crumb expired/invalid → refresh once
+            session, crumb = _yahoo_session(force=True)
+            if not session:
+                return None, None, None
+            resp = _do(session, crumb)
+        if resp.status_code == 429:
+            logger.warning(f"Fundamentals rate limited for {yf_ticker}")
+            return None, None, None
+        if resp.status_code != 200:
+            return None, None, None
+        result = (resp.json().get("quoteSummary", {}) or {}).get("result")
+        if not result:
+            return None, None, None
+        d = result[0]
     except Exception as e:
-        logger.warning(f"Fundamentals fetch failed for {yf_ticker}: {e}")
+        logger.debug(f"Fundamentals fetch failed for {yf_ticker}: {e}")
         return None, None, None
 
-    if not info or info.get("regularMarketPrice") is None and info.get("currentPrice") is None:
-        return None, None, None
+    fd = d.get("financialData", {}) or {}
+    ks = d.get("defaultKeyStatistics", {}) or {}
+    sd = d.get("summaryDetail", {}) or {}
+    ap = d.get("assetProfile", {}) or {}
+    pr = d.get("price", {}) or {}
 
-    def pct(v):   # yfinance fraction (0.10) → percent (10.0)
+    def raw(o, k):  # quoteSummary numbers are {"raw": x, "fmt": ...}
+        v = o.get(k)
+        return v.get("raw") if isinstance(v, dict) else v
+    def pct(v):        # fraction (0.10) → percent (10.0)
         return v * 100 if isinstance(v, (int, float)) else None
     def div_pct(v):
         if not isinstance(v, (int, float)):
             return None
-        return v * 100 if v < 1 else v  # yfinance versions differ; normalize to percent
-    def ratio_de(v):
-        return v / 100.0 if isinstance(v, (int, float)) else None  # yfinance D/E is a percent
+        return v * 100 if v < 1 else v
+    def ratio_de(v):   # Yahoo D/E is a percent (150.5) → ratio (1.505)
+        return v / 100.0 if isinstance(v, (int, float)) else None
 
     f = {
-        "trailingPE": info.get("trailingPE"),
-        "forwardPE": info.get("forwardPE"),
-        "priceToBook": info.get("priceToBook"),
-        "enterpriseToEbitda": info.get("enterpriseToEbitda"),
-        "debtToEquity": ratio_de(info.get("debtToEquity")),
-        "returnOnEquity": info.get("returnOnEquity"),          # fraction (scoring ×100)
-        "operatingCashflow": info.get("operatingCashflow"),
-        "freeCashflow": info.get("freeCashflow"),
-        "netIncome": info.get("netIncomeToCommon"),
-        "totalRevenue": info.get("totalRevenue"),
-        "totalCash": info.get("totalCash"),
-        "totalDebt": info.get("totalDebt"),
-        "currentRatio": info.get("currentRatio"),
-        "revenueGrowth": pct(info.get("revenueGrowth")),
-        "earningsGrowth": pct(info.get("earningsGrowth")),
-        "grossMargins": pct(info.get("grossMargins")),
-        "operatingMargins": pct(info.get("operatingMargins")),
-        "profitMargins": pct(info.get("profitMargins")),
-        "dividendYield": div_pct(info.get("dividendYield")),
-        "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
+        "trailingPE": raw(sd, "trailingPE"),
+        "forwardPE": raw(sd, "forwardPE") or raw(ks, "forwardPE"),
+        "priceToBook": raw(ks, "priceToBook"),
+        "enterpriseToEbitda": raw(ks, "enterpriseToEbitda"),
+        "debtToEquity": ratio_de(raw(fd, "debtToEquity")),
+        "returnOnEquity": raw(fd, "returnOnEquity"),          # fraction (scoring ×100)
+        "operatingCashflow": raw(fd, "operatingCashflow"),
+        "freeCashflow": raw(fd, "freeCashflow"),
+        "netIncome": raw(ks, "netIncomeToCommon"),
+        "totalRevenue": raw(fd, "totalRevenue"),
+        "totalCash": raw(fd, "totalCash"),
+        "totalDebt": raw(fd, "totalDebt"),
+        "currentRatio": raw(fd, "currentRatio"),
+        "revenueGrowth": pct(raw(fd, "revenueGrowth")),
+        "earningsGrowth": pct(raw(fd, "earningsGrowth")),
+        "grossMargins": pct(raw(fd, "grossMargins")),
+        "operatingMargins": pct(raw(fd, "operatingMargins")),
+        "profitMargins": pct(raw(fd, "profitMargins")),
+        "dividendYield": div_pct(raw(sd, "dividendYield")),
+        "fiftyTwoWeekLow": raw(sd, "fiftyTwoWeekLow"),
     }
-    price = info.get("currentPrice") or info.get("regularMarketPrice")
-    return f, price, info.get("sector")
+    price = raw(fd, "currentPrice") or raw(pr, "regularMarketPrice")
+    if price is None and all(v is None for v in f.values()):
+        return None, None, None
+    return f, price, ap.get("sector")
 
 # ── Value-score enrichment: compute value_score for every scanned stock in a
 # paced background thread (fundamentals are too rate-limit-heavy for the scan
@@ -1111,6 +1176,32 @@ value_enrich = {
 }
 _value_cache = {}          # yf_ticker -> (score, rating, sector, ts)
 VALUE_CACHE_TTL = 6 * 3600  # fundamentals barely move intraday
+
+def attach_value_score(stock, yf_ticker, force=False):
+    """
+    Fetch fundamentals (per-ticker cached) and attach value_score/rating/sector to
+    a stock dict IN PLACE. Called inline during the scan, right after the technical
+    analysis for that symbol (matches the Android enrichment pass). On any failure
+    (rate-limit / missing) it silently leaves the value unset — the technical scores
+    are kept. Returns True if a value was attached.
+    """
+    if not yf_ticker:
+        return False
+    try:
+        cached = _value_cache.get(yf_ticker)
+        if not force and cached and (time.time() - cached[3]) < VALUE_CACHE_TTL:
+            stock["value_score"], stock["value_rating"], stock["value_sector"] = cached[0], cached[1], cached[2]
+            return isinstance(cached[0], int)
+        f, price, sector = fetch_fundamentals(yf_ticker)
+        if f is None:
+            return False  # keep technicals; value fills in on the refresh pass
+        score, rating, _rows = scoring.value_score(f, price or stock.get("price") or 0.0)
+        stock["value_score"], stock["value_rating"], stock["value_sector"] = score, rating, sector
+        _value_cache[yf_ticker] = (score, rating, sector, time.time())
+        return True
+    except Exception as e:
+        logger.debug(f"Value attach error {yf_ticker}: {e}")
+        return False
 
 def enrich_values(mkt, force=False):
     if mkt not in value_enrich or value_enrich[mkt]["running"]:
@@ -1128,24 +1219,11 @@ def enrich_values(mkt, force=False):
             if not force and isinstance(s.get("value_score"), int):
                 value_enrich[mkt]["done"] += 1
                 continue
-            cached = _value_cache.get(yf_ticker)
-            if cached and (time.time() - cached[3]) < VALUE_CACHE_TTL:
-                s["value_score"], s["value_rating"], s["value_sector"] = cached[0], cached[1], cached[2]
-                value_enrich[mkt]["done"] += 1
-                continue
-            try:
-                f, price, sector = fetch_fundamentals(yf_ticker)
-                if f is None:
-                    s["value_score"] = None; s["value_rating"] = "N/A"
-                else:
-                    score, rating, _rows = scoring.value_score(f, price or s.get("price") or 0.0)
-                    s["value_score"] = score; s["value_rating"] = rating; s["value_sector"] = sector
-                    _value_cache[yf_ticker] = (score, rating, sector, time.time())
-            except Exception as e:
-                logger.debug(f"Value enrich error {yf_ticker}: {e}")
+            attached = attach_value_score(s, yf_ticker, force=force)
+            if not attached and not isinstance(s.get("value_score"), int):
                 s["value_score"] = None; s["value_rating"] = "N/A"
             value_enrich[mkt]["done"] += 1
-            time.sleep(0.6)  # pace to stay under Yahoo rate limits
+            time.sleep(0.15)  # light pace — one direct quoteSummary call per stock
     finally:
         value_enrich[mkt]["running"] = False
         value_enrich[mkt]["ts"] = datetime.now().isoformat()
@@ -1526,9 +1604,11 @@ def api_value_status():
     """Progress of value enrichment per market (for the discovery table)."""
     return jsonify(value_enrich)
 
+_ai_pullback_cache = {}  # yf_ticker -> {"analysis","headlines","ts"} (auto-fired once per symbol)
+
 @app.route("/api/ai/pullback", methods=["POST"])
 def api_ai_pullback():
-    """AI Pullback Analysis (spec §5): TEMPORARY / STRUCTURAL / UNCERTAIN."""
+    """AI Pullback Analysis (spec §5): TEMPORARY / STRUCTURAL / UNCERTAIN. Cached per symbol."""
     body = request.get_json() or {}
     symbol = (body.get("symbol") or "").strip()
     market = body.get("market")
@@ -1537,6 +1617,11 @@ def api_ai_pullback():
     stock, mkt = _find_scan_stock(symbol, market)
     if not stock:
         return jsonify({"error": f"{symbol} not found in scan results — run a scan first"}), 404
+    cache_key = stock.get("token") or symbol
+    cached = _ai_pullback_cache.get(cache_key)
+    if cached and not body.get("force"):
+        return jsonify({"symbol": symbol, "analysis": cached["analysis"],
+                        "headlines": cached["headlines"], "cached": True})
     ctx = _market_context(mkt)
     name = stock.get("name", symbol)
     ticker = _strip_exchange_suffix(stock.get("token") or symbol)
@@ -1582,6 +1667,7 @@ def api_ai_pullback():
         text = call_llm(system, user, max_tokens=500)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 502
+    _ai_pullback_cache[cache_key] = {"analysis": text, "headlines": headlines, "ts": time.time()}
     return jsonify({"symbol": symbol, "analysis": text, "headlines": headlines})
 
 @app.route("/api/ai/outlook", methods=["POST"])

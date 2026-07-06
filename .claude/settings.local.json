@@ -16,7 +16,9 @@
       "PowerShell(python -c \"print\\('hello from python'\\)\")",
       "Bash(ls .claude/)",
       "Bash(cat .claude/launch.json)",
-      "Bash(timeout 25 python \"C:\\\\Users\\\\gupta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-gupta-PycharmProjects-HObBY-PROJECTS-Angel-One-Automation\\\\de27c5af-a555-4061-9c3a-864b7543eb74\\\\scratchpad\\\\seed_preview.py\")"
+      "Bash(timeout 25 python \"C:\\\\Users\\\\gupta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-gupta-PycharmProjects-HObBY-PROJECTS-Angel-One-Automation\\\\de27c5af-a555-4061-9c3a-864b7543eb74\\\\scratchpad\\\\seed_preview.py\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py',encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(timeout 90 python -)"
     ]
   }
 }
