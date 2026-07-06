@@ -11,7 +11,7 @@ v4.1 Changes:
   - No API keys or credentials needed for scanning
 """
 
-import os, time, threading, logging, hashlib, json, math
+import os, sys, time, threading, logging, hashlib, json, math
 from datetime import datetime, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,8 +25,26 @@ from us_market import (
     US_RATE_LIMITED
 )
 
+# Force UTF-8 console output so an un-encodable log line (₹, emoji, box-art) on a
+# legacy Windows codepage can't crash the server with UnicodeEncodeError.
+for _stream in ("stdout", "stderr"):
+    try:
+        getattr(sys, _stream).reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# Surface exceptions that escape a background thread (scan/prefetch/scheduler) —
+# by default Python only prints these to stderr with no context.
+def _thread_excepthook(args):
+    logger.error("UNCAUGHT exception in thread %r", getattr(args.thread, "name", "?"),
+                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+try:
+    threading.excepthook = _thread_excepthook
+except Exception:
+    pass
 
 app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
@@ -823,6 +841,7 @@ def run_nifty_scan():
     }
     logger.info(f"NIFTY SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys")
     is_scanning["nifty500"] = False
+    threading.Thread(target=enrich_values, args=("nifty500",), daemon=True).start()
 
 # ═══════════════════════════════════════════════════════════════
 # SCAN — NASDAQ 100 (yfinance)
@@ -936,6 +955,7 @@ def run_nasdaq_scan():
     }
     logger.info(f"NASDAQ SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys")
     is_scanning["nasdaq100"] = False
+    threading.Thread(target=enrich_values, args=("nasdaq100",), daemon=True).start()
 
 # ═══════════════════════════════════════════════════════════════
 # COMBINED SCAN (parallel)
@@ -963,18 +983,31 @@ def run_full_scan(markets=None):
 # SCHEDULER
 # ═══════════════════════════════════════════════════════════════
 
+# Set SKIP_AUTOSCAN=1 to bring the dashboard up WITHOUT auto-scanning on launch
+# (useful to get a working URL if a scan is crashing — trigger scans manually).
+SKIP_AUTOSCAN = os.getenv("SKIP_AUTOSCAN", "").strip() in ("1", "true", "True")
+
 def scheduler():
+    if SKIP_AUTOSCAN:
+        logger.info("SKIP_AUTOSCAN set — scheduler idle; use the Scan button to scan manually.")
+        return
+    # give the web server a moment to come up and be reachable before we launch
+    # into a heavy scan
+    time.sleep(5)
     while True:
         now = datetime.now()
         wd = now.weekday() < 5
         # Indian market hours
         ao = (now.hour==9 and now.minute>=15) or now.hour>=10
         bc = now.hour<15 or (now.hour==15 and now.minute<=30)
-        if wd and ao and bc:
-            run_full_scan(["nifty500"])
-        # US market scan at 8 PM IST (US market open ~7 PM IST)
-        if wd and now.hour == 20 and now.minute < 20:
-            run_full_scan(["nasdaq100"])
+        try:
+            if wd and ao and bc:
+                run_full_scan(["nifty500"])
+            # US market scan at 8 PM IST (US market open ~7 PM IST)
+            if wd and now.hour == 20 and now.minute < 20:
+                run_full_scan(["nasdaq100"])
+        except Exception:
+            logger.exception("Scheduled scan raised — continuing")
         time.sleep(SCAN_INTERVAL)
 
 # ═══════════════════════════════════════════════════════════════
@@ -1050,6 +1083,56 @@ def fetch_fundamentals(yf_ticker):
     }
     price = info.get("currentPrice") or info.get("regularMarketPrice")
     return f, price, info.get("sector")
+
+# ── Value-score enrichment: compute value_score for every scanned stock in a
+# paced background thread (fundamentals are too rate-limit-heavy for the scan
+# loop itself). Mutates the stored stock dicts in place so /api/results picks
+# them up on the next poll. ──
+value_enrich = {
+    "nifty500":  {"running": False, "done": 0, "total": 0, "ts": None},
+    "nasdaq100": {"running": False, "done": 0, "total": 0, "ts": None},
+}
+_value_cache = {}          # yf_ticker -> (score, rating, sector, ts)
+VALUE_CACHE_TTL = 6 * 3600  # fundamentals barely move intraday
+
+def enrich_values(mkt, force=False):
+    if mkt not in value_enrich or value_enrich[mkt]["running"]:
+        return
+    stocks = scan_results.get(mkt, {}).get("all_stocks", [])
+    if not stocks:
+        return
+    value_enrich[mkt].update({"running": True, "done": 0, "total": len(stocks)})
+    logger.info(f"Value enrichment start ({mkt}): {len(stocks)} stocks")
+    try:
+        for s in stocks:
+            if abort_scan.get(mkt):
+                break
+            yf_ticker = s.get("token") or s.get("symbol")
+            if not force and isinstance(s.get("value_score"), int):
+                value_enrich[mkt]["done"] += 1
+                continue
+            cached = _value_cache.get(yf_ticker)
+            if cached and (time.time() - cached[3]) < VALUE_CACHE_TTL:
+                s["value_score"], s["value_rating"], s["value_sector"] = cached[0], cached[1], cached[2]
+                value_enrich[mkt]["done"] += 1
+                continue
+            try:
+                f, price, sector = fetch_fundamentals(yf_ticker)
+                if f is None:
+                    s["value_score"] = None; s["value_rating"] = "N/A"
+                else:
+                    score, rating, _rows = scoring.value_score(f, price or s.get("price") or 0.0)
+                    s["value_score"] = score; s["value_rating"] = rating; s["value_sector"] = sector
+                    _value_cache[yf_ticker] = (score, rating, sector, time.time())
+            except Exception as e:
+                logger.debug(f"Value enrich error {yf_ticker}: {e}")
+                s["value_score"] = None; s["value_rating"] = "N/A"
+            value_enrich[mkt]["done"] += 1
+            time.sleep(0.6)  # pace to stay under Yahoo rate limits
+    finally:
+        value_enrich[mkt]["running"] = False
+        value_enrich[mkt]["ts"] = datetime.now().isoformat()
+        logger.info(f"Value enrichment done ({mkt}): {value_enrich[mkt]['done']} processed")
 
 def _strip_exchange_suffix(ticker):
     for suf in (".NS", ".BO", ".DE", ".NSE", ".BSE"):
@@ -1406,6 +1489,25 @@ def api_value():
     score, rating, rows = scoring.value_score(f, price or 0.0)
     return jsonify({"symbol": symbol, "market": mkt, "sector": sector,
                     "score": score, "rating": rating, "rows": rows, "price": price})
+
+@app.route("/api/value/enrich", methods=["POST"])
+def api_value_enrich():
+    """Kick off background value-score enrichment for all stocks in a market."""
+    body = request.get_json(silent=True) or {}
+    mkt = body.get("market") or request.args.get("market", "nifty500")
+    if mkt not in value_enrich:
+        return jsonify({"error": "unknown market"}), 400
+    if value_enrich[mkt]["running"]:
+        return jsonify({"status": "already_running", **value_enrich[mkt]})
+    force = bool(body.get("force"))
+    threading.Thread(target=enrich_values, args=(mkt, force), daemon=True).start()
+    return jsonify({"status": "started", "market": mkt,
+                    "total": len(scan_results.get(mkt, {}).get("all_stocks", []))})
+
+@app.route("/api/value/status")
+def api_value_status():
+    """Progress of value enrichment per market (for the discovery table)."""
+    return jsonify(value_enrich)
 
 @app.route("/api/ai/pullback", methods=["POST"])
 def api_ai_pullback():

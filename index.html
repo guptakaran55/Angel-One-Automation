@@ -86,7 +86,7 @@ input[type=range]{accent-color:#059669;height:4px;cursor:pointer;width:100%}
 .mo{position:fixed;inset:0;background:rgba(0,0,0,.3);backdrop-filter:blur(8px);z-index:200;display:flex;align-items:flex-end;justify-content:center;animation:fi .15s}
 @media(min-width:768px){.mo{align-items:center;padding:24px}}@keyframes fi{from{opacity:0}to{opacity:1}}
 .moc{background:var(--cd);border:1px solid var(--bd);border-radius:14px 14px 0 0;width:100%;max-height:88dvh;overflow-y:auto;animation:su .2s ease;box-shadow:0 -4px 24px rgba(0,0,0,.1)}
-@media(min-width:768px){.moc{max-width:680px;border-radius:14px;max-height:85vh;box-shadow:0 8px 32px rgba(0,0,0,.12)}}@keyframes su{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+@media(min-width:768px){.moc{max-width:min(1080px,94vw);border-radius:14px;max-height:88vh;box-shadow:0 8px 32px rgba(0,0,0,.12)}}@keyframes su{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 .moh{padding:16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:flex-start;position:sticky;top:0;background:var(--cd);z-index:1}
 .mox{width:26px;height:26px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t3);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .mob{padding:16px}
@@ -469,6 +469,21 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
       </div>
     </div><button className="mox" onClick={onClose}>✕</button></div>
     <div className="mob">
+      {/* AI ANALYSIS — top of the detail view (buttons disabled until server has an API key) */}
+      <div style={{marginBottom:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+          <div style={{fontSize:'10px',fontWeight:800,color:'var(--t2)',letterSpacing:'.5px'}}>{'🤖 AI ANALYSIS'+(aiEnabled?' · '+aiProvider:'')}</div>
+          {!aiEnabled&&<span style={{fontSize:'9px',fontWeight:600,color:'var(--am)'}}>{'set '+(aiProvider==='anthropic'?'ANTHROPIC_API_KEY':'OPENAI_API_KEY')+' in .env to enable'}</span>}
+        </div>
+        <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'8px'}}>
+          <button className="btn btn-sm btn-g" onClick={loadAiPB} disabled={!aiEnabled||aiPBLoad} style={!aiEnabled?{opacity:.5,cursor:'not-allowed'}:{}} title={aiEnabled?'Is this dip temporary or structural? (news + LLM)':'Add your API key to .env'}>{aiPBLoad?'Analyzing…':'🔍 Pullback Analysis'}</button>
+          <button className="btn btn-sm btn-pu" onClick={loadAiOL} disabled={!aiEnabled||aiOLLoad} style={!aiEnabled?{opacity:.5,cursor:'not-allowed'}:{}} title={aiEnabled?'Short/long-term outlook + BUY/WATCH/AVOID verdict (news + LLM)':'Add your API key to .env'}>{aiOLLoad?'Analyzing…':'📰 Stock Outlook'}</button>
+        </div>
+        {aiPBErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginBottom:'6px'}}>{aiPBErr}</div>}
+        {aiPB&&<div style={{fontSize:'12px',lineHeight:'1.5',color:'var(--t2)',whiteSpace:'pre-wrap',background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'6px',padding:'10px',marginBottom:'8px'}}>{aiPB}</div>}
+        {aiOLErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginBottom:'6px'}}>{aiOLErr}</div>}
+        {aiOL&&<div style={{fontSize:'12px',lineHeight:'1.5',color:'var(--t2)',whiteSpace:'pre-wrap',background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'6px',padding:'10px'}}>{aiOL}</div>}
+      </div>
       {isGolden && <div style={{padding:'12px',marginBottom:'12px',background:'linear-gradient(135deg,rgba(217,119,6,.1),rgba(234,179,8,.08))',border:'2px solid rgba(217,119,6,.3)',borderRadius:'8px',textAlign:'center'}}>
         <div style={{fontSize:'18px',fontWeight:800,color:'#b45309'}}>{'★ GOLDEN BUY OPPORTUNITY ★'}</div>
       </div>}
@@ -498,7 +513,7 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
       {(function(){
         var ph=s.price_history||[];
         if(ph.length<2)return null;
-        var W=520,H=90;
+        var W=1000,H=180;
         var mn=Math.min.apply(null,ph),mx=Math.max.apply(null,ph),rng=(mx-mn)||1;
         var pts=ph.map(function(v,i){return (i/(ph.length-1))*W+','+(H-(v-mn)/rng*H).toFixed(2)});
         var pathD='M'+pts.join(' L');
@@ -560,15 +575,15 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
         var zy=typeof s.macd_zero_y==='number'?s.macd_zero_y:0.5;
         var macdChart=null;
         if(cv.length>2){
-          var W=260,MH=50;
+          var W=1000,MH=130;
           var pts=cv.map(function(v,i){return (i/(cv.length-1))*W+','+(MH-v*MH)});
           var pd='M'+pts.join(' L');
           var zly=MH-zy*MH;
-          macdChart=<svg width="100%" height="50" viewBox={'0 0 '+W+' '+MH} preserveAspectRatio="none" style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.03)'}}>
-            <line x1="0" y1={zly} x2={W} y2={zly} stroke="#dc2626" strokeWidth="2" strokeDasharray="4,3" opacity="0.6"/>
-            <text x="3" y={Math.max(8,zly-3)} fill="var(--t3)" fontSize="6">0</text>
-            <path d={pd} fill="none" stroke={pc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <circle cx={W} cy={MH-(cv[cv.length-1]||0)*MH} r="3" fill={pc}/>
+          macdChart=<svg width="100%" height={MH} viewBox={'0 0 '+W+' '+MH} preserveAspectRatio="none" style={{marginBottom:'8px',borderRadius:'4px',background:'rgba(0,0,0,.03)'}}>
+            <line x1="0" y1={zly} x2={W} y2={zly} stroke="#dc2626" strokeWidth="1.5" strokeDasharray="8,5" opacity="0.6"/>
+            <text x="6" y={Math.max(14,zly-4)} fill="var(--t3)" fontSize="13">0</text>
+            <path d={pd} fill="none" stroke={pc} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <circle cx={W} cy={MH-(cv[cv.length-1]||0)*MH} r="5" fill={pc}/>
           </svg>;
         }
         return <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
@@ -630,21 +645,6 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
         {valData&&valData.rows&&<div className="ig" style={{marginTop:'8px'}}>{valData.rows.map(function(b,i){var pct=b.max>0?Math.round(b.points/b.max*100):0;var col=stColor(b.status);
           return <div className="ic" key={i}><div className="ich"><span className="ict">{b.name}</span><span style={{fontSize:'9px',fontWeight:700,color:col}}>{b.points+'/'+b.max}</span></div>{b.max>0&&<div className="sbar"><div className="sbar-f" style={{width:pct+'%',background:col}}/></div>}<div className="icd">{b.reason}</div></div>
         })}</div>}
-      </div>
-      {/* AI ANALYSIS (on-demand — always shown; buttons disabled until server has an API key) */}
-      <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px'}}>{'AI ANALYSIS'+(aiEnabled?' · '+aiProvider:'')}</div>
-          {!aiEnabled&&<span style={{fontSize:'9px',fontWeight:600,color:'var(--am)'}}>{'set '+(aiProvider==='anthropic'?'ANTHROPIC_API_KEY':'OPENAI_API_KEY')+' in .env to enable'}</span>}
-        </div>
-        <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'8px'}}>
-          <button className="btn btn-sm btn-g" onClick={loadAiPB} disabled={!aiEnabled||aiPBLoad} style={!aiEnabled?{opacity:.5,cursor:'not-allowed'}:{}} title={aiEnabled?'Is this dip temporary or structural? (news + LLM)':'Add your API key to .env'}>{aiPBLoad?'Analyzing…':'🔍 Pullback Analysis'}</button>
-          <button className="btn btn-sm btn-pu" onClick={loadAiOL} disabled={!aiEnabled||aiOLLoad} style={!aiEnabled?{opacity:.5,cursor:'not-allowed'}:{}} title={aiEnabled?'Short/long-term outlook + BUY/WATCH/AVOID verdict (news + LLM)':'Add your API key to .env'}>{aiOLLoad?'Analyzing…':'📰 Stock Outlook'}</button>
-        </div>
-        {aiPBErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginBottom:'6px'}}>{aiPBErr}</div>}
-        {aiPB&&<div style={{fontSize:'12px',lineHeight:'1.5',color:'var(--t2)',whiteSpace:'pre-wrap',background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'6px',padding:'10px',marginBottom:'8px'}}>{aiPB}</div>}
-        {aiOLErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginBottom:'6px'}}>{aiOLErr}</div>}
-        {aiOL&&<div style={{fontSize:'12px',lineHeight:'1.5',color:'var(--t2)',whiteSpace:'pre-wrap',background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'6px',padding:'10px'}}>{aiOL}</div>}
       </div>
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--rd)',marginBottom:'8px'}}>SELL INDICATORS</h3>
       <div className="ig">{["sma_break","macd_inflection","rsi","bollinger","adx","obv"].map(function(k){var b=(s.sell_breakdown||{})[k];if(!b)return null;return <div className="ic" key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span style={{fontSize:'9px',fontWeight:700,color:b.pass?'var(--rd)':'var(--t3)'}}>{b.pts+'/'+b.max}</span></div>{b.pass&&<div style={{height:'4px',borderRadius:'2px',background:'var(--rg)',overflow:'hidden',marginBottom:'4px'}}><div style={{width:Math.round(b.pts/b.max*100)+'%',height:'100%',background:'var(--rd)',borderRadius:'2px'}}/></div>}<div className="icd" style={{fontSize:'10px',color:b.pass?'var(--t2)':'var(--t3)'}}>{b.desc}</div></div>})}</div>
@@ -788,6 +788,7 @@ function App(){
   var [addingWL,setAddingWL]=useState(false);
   var [newWLName,setNewWLName]=useState('');
   var [scanError,setScanError]=useState(null);
+  var [valueStatus,setValueStatus]=useState(null);
   var [showDocs,setShowDocs]=useState(false);
   var [showChart,setShowChart]=useState(true);
   var [zerodhaHoldings,setZerodhaHoldings]=useState(null);
@@ -830,11 +831,17 @@ function App(){
     return Promise.all([
       fetch(API+'/api/results?market='+market),
       fetch(API+'/api/status'),
-      fetch(API+'/api/progress')
+      fetch(API+'/api/progress'),
+      fetch(API+'/api/value/status')
     ]).then(function(res){return Promise.all(res.map(function(r){return r.json()}))})
-      .then(function(arr){setData(arr[0]);setStatus(arr[1]);setProgress(arr[2])})
+      .then(function(arr){setData(arr[0]);setStatus(arr[1]);setProgress(arr[2]);setValueStatus(arr[3])})
       .catch(function(){}).finally(function(){setLoading(false)});
   },[market]);
+
+  var enrichValues=function(){
+    fetch(API+'/api/value/enrich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:market})})
+      .then(function(r){return r.json()}).then(function(){setTimeout(fetchAll,800)}).catch(function(){});
+  };
 
   useEffect(function(){
     setLoading(true);setData(null);
@@ -1042,6 +1049,17 @@ function App(){
 
       <div className="srch"><input placeholder={"Search "+mktConf.name+"..."} value={search} onChange={function(e){setSearch(e.target.value)}}/></div>
 
+      {data && allStocks.length>0 && tab!=='zport' && tab!=='sectors' && (function(){
+        var vs=valueStatus&&valueStatus[market];
+        var running=vs&&vs.running;
+        var withVal=allStocks.filter(function(s){return typeof s.value_score==='number'}).length;
+        return <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
+          <button className="btn btn-sm btn-pu" onClick={enrichValues} disabled={running} title="Fetch Yahoo fundamentals and score every stock's fundamental value (runs in the background)">{running?'Computing values…':(withVal>0?'↻ Refresh value scores':'📊 Compute value scores')}</button>
+          {running && vs.total>0 && <div style={{flex:1,minWidth:'120px',maxWidth:'320px'}}><div className="scan-prog"><div className="scan-fill" style={{width:Math.round(vs.done/vs.total*100)+'%'}}/></div></div>}
+          <span style={{fontSize:'10px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}}>{running?(vs.done+'/'+vs.total):(withVal+'/'+allStocks.length+' valued')}</span>
+        </div>;
+      })()}
+
       {/* Zerodha Portfolio Tab */}
       {tab==='zport'?<div>
         {zerodhaLoading?<div className="ld"><div className="sp"/>Loading Zerodha holdings...</div>
@@ -1123,19 +1141,20 @@ function App(){
         {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div><div style={{fontSize:'13px'}}>{search?'No match for "'+search+'"':isSc?'Scanning...':'No data yet. Click Scan to start.'}</div></div>
         :<div className="ts"><table>
           <thead><tr>
-            <th onClick={function(){doSort('symbol')}} style={{width:'200px'}}>Stock</th>
-            <th onClick={function(){doSort('price')}}>Price</th>
-            <th title="252-day price line">1Y</th>
-            <th onClick={function(){doSort('momentum_score')}} title="Trend-continuation / buy-and-hold quality">Mom</th>
-            <th onClick={function(){doSort('pullback_score')}} title="Buy-the-dip in an uptrend">Pull</th>
-            <th onClick={function(){doSort('sell_score')}}>Sell</th>
-            <th onClick={function(){doSort('macd_slope')}}>MACD</th>
-            <th onClick={function(){doSort('price_accel')}}>Price</th>
-            <th onClick={function(){doSort('rr_ratio')}}>R:R</th>
-            <th onClick={function(){doSort('risk_in_atrs')}}>ATR Risk</th>
-            <th onClick={function(){doSort('capital_needed')}}>Capital</th>
-            <th onClick={function(){doSort('roc_pct')}}>ROC%</th>
-            <th>Signal</th>
+            <th onClick={function(){doSort('symbol')}} style={{width:'200px'}} title="Company name · ticker · avg daily volume · index membership">Stock</th>
+            <th onClick={function(){doSort('price')}} title="Last traded price">Price</th>
+            <th title="252-day closing-price line. Hover a row's chart for the 1-year % change.">1Y Chart</th>
+            <th onClick={function(){doSort('momentum_score')}} title="Momentum score (0–103): trend-continuation & buy-and-hold quality. Higher = a stronger, established uptrend.">Momentum</th>
+            <th onClick={function(){doSort('pullback_score')}} title="Pullback score (0–118): buy-the-dip quality inside an uptrend. Higher = a better dip entry.">Pullback</th>
+            <th onClick={function(){doSort('value_score')}} title="Fundamental Value score (0–100) from Yahoo fundamentals (P/E, ROE, growth, margins, debt…). Computed in the background after a scan.">Value</th>
+            <th onClick={function(){doSort('sell_score')}} title="Sell score: strength of exit/short signals — trend break, overbought RSI, bearish MACD, distribution.">Sell</th>
+            <th onClick={function(){doSort('macd_slope')}} title="MACD slope d(MACD)/dt, phase and current MACD value. Positive slope = rising momentum; a fresh zero-cross is a buy flip.">MACD</th>
+            <th onClick={function(){doSort('price_accel')}} title="Daily price velocity, acceleration and current up-streak.">Price Δ</th>
+            <th onClick={function(){doSort('rr_ratio')}} title="Reward-to-Risk ratio = (resistance − price) ÷ (price − support). ≥ 2:1 is favourable.">R:R</th>
+            <th onClick={function(){doSort('risk_in_atrs')}} title="Distance from price down to support, measured in ATR(14) units. Lower = a tighter, safer stop.">ATR Risk</th>
+            <th onClick={function(){doSort('capital_needed')}} title="Capital required (→ potential profit at target) for a position sized to risk ₹10k/trade.">Capital</th>
+            <th onClick={function(){doSort('roc_pct')}} title="Return-on-capital % if the resistance target is hit, for a ₹10k-risk position.">ROC%</th>
+            <th title="Overall entry/exit verdict derived from the composite of the scores.">Signal</th>
           </tr></thead>
           <tbody>{stocks.map(function(s){return <tr key={s.symbol} onClick={function(){setSel(s)}} style={{cursor:'pointer'}}>
             <td className="stockcell"><div className="sn"><span className="sns">{s.name}</span>{goldenMatch(s) && <span title="Golden Buy" style={{display:'inline-block',padding:'0 4px',borderRadius:'3px',fontSize:'10px',fontWeight:700,background:'rgba(217,119,6,.12)',color:'#b45309',marginLeft:'4px',verticalAlign:'middle'}}>★</span>}{s.in_portfolio && <span className="pb">HELD</span>}<span className="snn">{s.symbol}{s.avg_vol_20?' · '+fmtVol(s.avg_vol_20):''}<ITags indices={s.indices} max={2}/></span></div></td>
@@ -1143,6 +1162,7 @@ function App(){
             <td><PriceSpark data={s.price_history}/></td>
             <td><span className={'score score-buy '+(s.momentum_score>=75?'strong':'')}>{s.momentum_score!=null?s.momentum_score:'—'}</span></td>
             <td><span className="score" style={{color:'var(--pu)',background:'rgba(139,92,246,.12)',fontWeight:700}}>{s.pullback_score!=null?s.pullback_score:'—'}</span></td>
+            <td>{typeof s.value_score==='number'?<span className="score" title={s.value_rating||''} style={{color:s.value_score>=65?'var(--gn)':s.value_score>=50?'var(--am)':'var(--t3)',background:s.value_score>=65?'var(--gg)':s.value_score>=50?'rgba(245,158,11,.12)':'var(--bg2)',fontWeight:700}}>{s.value_score}</span>:s.value_score===null?<span style={{color:'var(--t3)',fontSize:'10px'}} title="No fundamentals available">N/A</span>:<span style={{color:'var(--t3)',fontSize:'12px'}} title="Not computed yet — use ‘Value scores’ button">…</span>}</td>
             <td><span className={'score score-sell '+(s.sell_score>=65?'strong':'')}>{s.sell_score||0}</span></td>
             <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve} zeroY={s.macd_zero_y} macdVal={s.macd}/></td>
             <td><PriceAccel vel={s.price_vel} accel={s.price_accel} upDays={s.up_days}/></td>
