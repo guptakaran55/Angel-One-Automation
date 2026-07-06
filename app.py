@@ -11,13 +11,14 @@ v4.1 Changes:
   - No API keys or credentials needed for scanning
 """
 
-import os, time, threading, logging, hashlib, json
+import os, time, threading, logging, hashlib, json, math
 from datetime import datetime, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np, pandas as pd, requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+import scoring
 from index_data import get_scan_universe, build_index_tags, get_tags_for
 from us_market import (
     get_nasdaq100_symbols, fetch_us_candle_data, fetch_index_chart_data,
@@ -35,6 +36,24 @@ SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "900"))
 MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "100000"))
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "signal2026")
+
+# ── AI features (Value/AI scores are on-demand, not part of bulk scans) ──
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o").strip()
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+AI_MODEL = os.getenv("AI_MODEL", "claude-sonnet-5").strip()
+# Provider: "openai" (ChatGPT) or "anthropic" (Claude). Auto-picks from whichever
+# key is present if unset; defaults to OpenAI otherwise.
+AI_PROVIDER = os.getenv("AI_PROVIDER", "").strip().lower()
+if not AI_PROVIDER:
+    AI_PROVIDER = "openai" if OPENAI_API_KEY else ("anthropic" if ANTHROPIC_API_KEY else "openai")
+
+def ai_is_enabled():
+    return (AI_PROVIDER == "openai" and bool(OPENAI_API_KEY)) or \
+           (AI_PROVIDER == "anthropic" and bool(ANTHROPIC_API_KEY))
+
+def ai_active_model():
+    return OPENAI_MODEL if AI_PROVIDER == "openai" else AI_MODEL
 
 # Zerodha
 ZERODHA_API_KEY    = os.getenv("ZERODHA_API_KEY", "")
@@ -395,20 +414,7 @@ def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
             macd_curve = [round((v - mn) / rng, 3) for v in raw]
             macd_zero_y = round((0 - mn) / rng, 3)
 
-    # ── BUY SCORE ──
-    buy_score = 0; buy_breakdown = {}
-
-    sma_p = bool(price > s200) if ok(s200) else False
-    sma_pts = sma_max_pts if sma_p else 0
-    buy_score += sma_pts
-    if not has_sma200 and has_sma50:
-        sma_desc = f"Close > {sma_label} (newer listing, {n_candles} candles)"
-    elif has_sma200:
-        sma_desc = "Close > SMA(200)"
-    else:
-        sma_desc = f"N/A ({n_candles} candles < 50)"
-    buy_breakdown["sma200"] = {"pass": sma_p, "pts": sma_pts, "max": sma_max_pts, "val": sf(s200), "desc": sma_desc}
-
+    # ── MACD percentile / golden-buy inputs (feed both sell score and new scorers) ──
     macd_vals = ml.dropna()
     macd_1y_low = 0; macd_low_pct = 0; macd_pctl = 50
     if len(macd_vals) >= 60:
@@ -427,114 +433,114 @@ def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
         macd_low_pct = 0; macd_pctl = 50
 
     golden_buy = bool(macd_low_pct >= 60 and macd_slope <= 0.2 and sma200_slope > 0.1)
-    macd_inf_pts = 0; macd_inf_desc = ""
-    if golden_buy:
-        macd_inf_pts = 30
-        macd_inf_desc = f"★ GOLDEN BUY — MACD at {macd_low_pct:.0f}% of 1Y low ({macd_1y_low:.1f}) + flat + SMA↑"
-    elif macd_zero_cross_up and macd_accel > 0:
-        macd_inf_pts = 30
-        macd_inf_desc = "MACD crossed 0↑ + accel ↑ (PRIME ENTRY)"
-    elif slope_cross_up:
-        macd_inf_pts = 20
-        macd_inf_desc = "Slope flipped positive ↑"
-    elif early_buy:
-        macd_inf_pts = 10
-        macd_inf_desc = "Decline slowing (d²>0, d<0)"
-    pctl_bonus = 0
-    if macd_pctl <= 25 and macd_inf_pts > 0:
-        pctl_bonus = 3
-        macd_inf_desc += f" +pctl bonus ({macd_pctl:.0f}%ile)"
-    macd_inf_pass = macd_inf_pts > 0
-    golden_bonus = 10 if golden_buy else 0
-    buy_score += macd_inf_pts + golden_bonus + pctl_bonus
-    buy_breakdown["macd_inflection"] = {"pass": macd_inf_pass, "pts": macd_inf_pts + golden_bonus + pctl_bonus, "max": 43,
-                                         "val": sf(macd_slope, 4), "desc": macd_inf_desc or "No inflection detected"}
 
-    rsi_pts = 0; rsi_desc = ""
-    if ok(r14):
-        r = float(r14)
-        if 25 <= r <= 55:
-            if r <= 35: rsi_pts = int(5 + 15 * (r - 25) / 10)
-            else: rsi_pts = int(20 * (55 - r) / 20)
-            rsi_pts = max(0, min(20, rsi_pts))
-            rsi_desc = f"RSI {r:.1f} (graduated, peak at 35)"
-        elif r < 25:
-            rsi_pts = 3
-            rsi_desc = f"RSI {r:.1f} (deeply oversold — caution)"
-        else:
-            rsi_pts = 0
-            rsi_desc = f"RSI {r:.1f} (above buy zone)"
-    else:
-        rsi_desc = "RSI unavailable"
-    rsi_p = rsi_pts > 0
-    buy_score += rsi_pts
-    buy_breakdown["rsi"] = {"pass": rsi_p, "pts": rsi_pts, "max": 20, "val": sf(r14), "desc": rsi_desc}
-
-    bb_p = bool(abm or tlb) if ok(cbm) else False
-    bb_pts = (10 + (5 if tlb else 0)) if bb_p else 0; buy_score += bb_pts
-    buy_breakdown["bollinger"] = {"pass": bb_p, "pts": bb_pts, "max": 15, "val": sf(cbm), "desc": "At/below mid BB" + (" +touched lower" if tlb else "")}
-
+    # ═══════════════════════════════════════════════════════════════
+    # NEW: MOMENTUM + PULLBACK SCORES (ported from Android — see scoring.py)
+    # Trend-continuation and buy-the-dip are scored on SEPARATE lenses so
+    # they no longer interfere. Everything below reuses indicators already
+    # computed above, plus a few extra long-term/EMA-cascade metrics.
+    # ═══════════════════════════════════════════════════════════════
     bullish_trend = bool(curr_plus_di > curr_minus_di)
-    adx_strong = bool(curr_adx > 25)
-    adx_very_strong = bool(curr_adx > 30)
-    if adx_strong and bullish_trend:
-        adx_pts = 15 + (5 if adx_very_strong else 0)
-        adx_desc = f"ADX {float(curr_adx):.1f} · +DI({curr_plus_di:.1f}) > -DI({curr_minus_di:.1f}) ↑ uptrend"
-        if adx_very_strong: adx_desc += " +bonus >30"
-    elif adx_strong and not bullish_trend:
-        adx_pts = 0
-        adx_desc = f"ADX {float(curr_adx):.1f} · -DI({curr_minus_di:.1f}) > +DI({curr_plus_di:.1f}) ↓ downtrend — no points"
+
+    # --- EMA(50/200) + slopes, EMA(21) slope ---
+    def _ema_val_slope(period):
+        if n_candles < period:
+            return None, 0.0
+        es = calc_ema(close, period)
+        v = es.iloc[-1]
+        vp = es.iloc[-2] if len(es) >= 2 else v
+        if not ok(v):
+            return None, 0.0
+        return float(v), (float(v - vp) if ok(vp) else 0.0)
+
+    ema50_val, ema50_slope = _ema_val_slope(50)
+    ema200_val, ema200_slope = _ema_val_slope(200)
+    ema21_slope = 0.0
+    if ok(ema21_val) and n_candles >= 22:
+        _e21 = calc_ema(close, 21)
+        _e21p = _e21.iloc[-2] if len(_e21) >= 2 else _e21.iloc[-1]
+        ema21_slope = float(_e21.iloc[-1] - _e21p) if ok(_e21p) else 0.0
+
+    # --- true SMA200 (None if < 200 bars, per spec) ---
+    sma200_true = float(s200) if (has_sma200 and ok(s200)) else None
+    sma200_true_slope = sma200_slope if has_sma200 else 0.0
+
+    # --- MACD angle + true percentile + bull phase ---
+    macd_slope_angle = math.degrees(math.atan(macd_slope))
+    if len(macd_vals) >= 30:
+        _stable = macd_vals.iloc[60:] if len(macd_vals) > 60 else macd_vals
+        _window = _stable.iloc[-252:] if len(_stable) > 252 else _stable
+        macd_pctl_true = round(100.0 * float((_window <= float(cm)).sum()) / len(_window), 1) if len(_window) else 50.0
     else:
-        adx_pts = 0
-        adx_desc = f"ADX {float(curr_adx):.1f} ≤ 25 — weak trend"
-    adx_p = adx_pts > 0
-    buy_score += adx_pts
-    buy_breakdown["adx"] = {"pass": adx_p, "pts": adx_pts, "max": 20, "val": sf(curr_adx), "desc": adx_desc,
-                             "plus_di": sf(curr_plus_di, 1), "minus_di": sf(curr_minus_di, 1)}
+        macd_pctl_true = 50.0
+    macd_phase_bull = "BULLISH" if (ok(cm) and ok(cms) and cm > cms) else "BEARISH"
 
-    obv_p = bool(co > co5 and co > co20)
-    obv_pts = 5 if obv_p else 0; buy_score += obv_pts
-    buy_breakdown["obv"] = {"pass": obv_p, "pts": obv_pts, "max": 5, "val": sf(co, 0), "desc": "OBV rising vs 5d & 20d"}
+    # --- RSI flip (turning up while oversold) ---
+    _rsi_series = calc_rsi(close, 14)
+    _rsi_prev = _rsi_series.iloc[-2] if len(_rsi_series) >= 2 else r14
+    rsi_buy_flip = bool(ok(r14) and ok(_rsi_prev) and float(r14) > float(_rsi_prev) and float(r14) < 50.0)
 
-    # 7. EMA(21) Proximity — max 10 pts
-    #    Rewards stocks pulled back near their 21-day EMA (ideal entry zone)
-    #    Penalizes stocks stretched far above (chasing) or with no EMA data
-    ema_pts = 0; ema_desc = ""
-    if ok(ema21_val) and n_candles >= 21:
-        d = ema21_pct_diff
-        if d < -3:
-            # More than 3% below EMA(21) — falling hard, risky
-            ema_pts = 3
-            ema_desc = f"Price {d:.1f}% below EMA(21) — deep pullback, caution"
-        elif -3 <= d < 0:
-            # 0-3% below EMA(21) — dipped below, pullback buy zone
-            ema_pts = 8
-            ema_desc = f"Price {d:.1f}% below EMA(21) — pullback entry zone"
-        elif 0 <= d <= 2:
-            # 0-2% above EMA(21) — sitting right on it, ideal
-            ema_pts = 10
-            ema_desc = f"Price {d:.1f}% above EMA(21) — ideal proximity"
-        elif 2 < d <= 4:
-            # 2-4% above — slightly stretched
-            ema_pts = 5
-            ema_desc = f"Price {d:.1f}% above EMA(21) — slightly stretched"
-        elif 4 < d <= 7:
-            # 4-7% above — stretched
-            ema_pts = 2
-            ema_desc = f"Price {d:.1f}% above EMA(21) — stretched"
-        else:
-            # >7% above — very stretched, wait for pullback
-            ema_pts = 0
-            ema_desc = f"Price {d:.1f}% above EMA(21) — overextended, wait"
+    # --- spec earlyBuy proxy: MACD hooking up while still below zero ---
+    early_buy_spec = bool(macd_accel > 0 and macd_slope > 0 and ok(cm) and cm < 0)
+
+    # --- OBV 5/20 moving averages ---
+    obv5_ma = float(ov.rolling(5).mean().iloc[-1]) if len(ov) >= 5 and ok(ov.rolling(5).mean().iloc[-1]) else float(co)
+    obv20_ma = float(ov.rolling(20).mean().iloc[-1]) if len(ov) >= 20 and ok(ov.rolling(20).mean().iloc[-1]) else float(co)
+
+    # --- long-term quality metrics ---
+    trend_persist = 0.0
+    if n_candles >= 200:
+        _sfull = calc_sma(close, 200)
+        _m = _sfull.notna()
+        _cc = close[_m]; _ss = _sfull[_m]
+        if len(_cc) >= 1:
+            _tail = min(200, len(_cc))
+            trend_persist = float((_cc.iloc[-_tail:].values > _ss.iloc[-_tail:].values).mean())
+
+    ema_cascade_ok = bool(ema21_val is not None and ema50_val is not None and ema200_val is not None
+                          and ok(ema21_val) and ema21_val > ema50_val > ema200_val)
+    ema_cascade_strong = bool(ema_cascade_ok and ema21_slope > 0 and ema50_slope > 0 and ema200_slope > 0)
+
+    _ddwin = close.iloc[-min(252, n_candles):]
+    _runmax = _ddwin.cummax()
+    max_drawdown = float(((_runmax - _ddwin) / _runmax).max()) if len(_ddwin) else 0.0
+
+    return6m = ((price - float(close.iloc[-126])) / float(close.iloc[-126]) * 100) if n_candles >= 126 and float(close.iloc[-126]) > 0 else 0.0
+    return12m = ((price - float(close.iloc[-252])) / float(close.iloc[-252]) * 100) if n_candles >= 252 and float(close.iloc[-252]) > 0 else 0.0
+
+    _rets = close.pct_change().dropna()
+    _rt = _rets.iloc[-min(252, len(_rets)):]
+    if len(_rt) >= 30:
+        _mean = float(_rt.mean()); _std = float(_rt.std(ddof=0))
+        sharpe_like = (_mean * 252) / (_std * (252 ** 0.5)) if _std > 0 else 0.0
     else:
-        ema_desc = "EMA(21) unavailable (< 21 candles)"
-    ema_p = ema_pts > 0
-    buy_score += ema_pts
-    buy_breakdown["ema21"] = {"pass": ema_p, "pts": ema_pts, "max": 10,
-                               "val": sf(ema21_val), "desc": ema_desc,
-                               "pct_diff": ema21_pct_diff}
+        sharpe_like = 0.0
 
-    buy_signal = "STRONG BUY" if buy_score >= 75 else ("MODERATE BUY" if buy_score >= 60 else "NO SIGNAL")
+    ind = {
+        "price": float(price),
+        "sma200Val": sma200_true, "sma200Slope": sma200_true_slope,
+        "sma50Val": (float(calc_sma(close, 50).iloc[-1]) if has_sma50 and ok(calc_sma(close, 50).iloc[-1]) else None),
+        "ema21Val": (float(ema21_val) if ok(ema21_val) else None), "ema21Slope": ema21_slope,
+        "ema50Val": ema50_val, "ema50Slope": ema50_slope,
+        "ema200Val": ema200_val, "ema200Slope": ema200_slope,
+        "ema21PctDiff": ema21_pct_diff,
+        "rsiVal": (float(r14) if ok(r14) else None), "rsiToday": (float(r14) if ok(r14) else 0.0),
+        "rsiBuyFlip": rsi_buy_flip,
+        "macdSlope": macd_slope, "macdSlopeAngle": macd_slope_angle, "macdAccel": macd_accel,
+        "macdPctl": macd_pctl_true, "macdPhaseBull": macd_phase_bull,
+        "macdZeroCrossUp": macd_zero_cross_up, "slopeCrossUp": slope_cross_up, "earlyBuy": early_buy_spec,
+        "belowMidBand": abm, "touchedLowerBand": tlb,
+        "currAdx": float(curr_adx), "bullishTrend": bullish_trend,
+        "obvCurrent": float(co), "obv5": obv5_ma, "obv20": obv20_ma,
+        "trendPersistencePct": trend_persist,
+        "emaCascadeOk": ema_cascade_ok, "emaCascadeStrong": ema_cascade_strong,
+        "maxDrawdownPct": max_drawdown,
+        "return6mPct": return6m, "return12mPct": return12m, "sharpeLike": sharpe_like,
+    }
+
+    pullback_pts, pullback_signal, pullback_rows = scoring.pullback_score(ind)
+    momentum_pts, momentum_signal, momentum_rows = scoring.momentum_score(ind)
+    comp = scoring.composite(pullback_pts, momentum_pts)
 
     # ── SELL SCORE ──
     sell_score = 0; sell_breakdown = {}
@@ -615,6 +621,14 @@ def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
         else:
             break
 
+    # 252-day price line (like the Android app). Downsampled to ~126 points to
+    # keep the results payload light; enough for a smooth sparkline.
+    _ph = close.iloc[-min(252, n_candles):]
+    _step = max(1, len(_ph) // 126)
+    price_history = [round(float(v), 2) for v in _ph.iloc[::_step]]
+    if price_history and float(_ph.iloc[-1]) != price_history[-1]:
+        price_history.append(round(float(_ph.iloc[-1]), 2))
+
     return {
         "price":sf(price),"sma200":sf(s200),"sma200_slope":round(sma200_slope,3),
         "sma_label":sma_label,"rsi":sf(r14),
@@ -625,6 +639,7 @@ def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
         "obv":sf(co,0),"adx":sf(curr_adx),"plus_di":sf(curr_plus_di,1),"minus_di":sf(curr_minus_di,1),
         "adx_bullish":bullish_trend,
         "ema21":sf(ema21_val),"ema21_pct_diff":ema21_pct_diff,
+        "price_history":price_history,
         "avg_vol_20":round(avg_vol_20, 0),
         "price_roc3":round(roc3,2),"price_vel":round(price_vel,2),
         "price_accel":round(price_accel,3),"up_days":up_days,
@@ -632,9 +647,13 @@ def analyze_stock(df, currency_symbol="₹", min_avg_volume=None):
         "atr":round(atr,2),"risk_in_atrs":risk_in_atrs,"position_size":position_size,
         "capital_needed":capital_needed,"potential_profit":potential_profit,"roc_pct":roc_pct,
         "currency": currency_symbol,
-        "buy_score":buy_score,"buy_signal":buy_signal,"buy_breakdown":buy_breakdown,
+        # ── NEW: separated momentum + pullback lenses (replaces old buy_score) ──
+        "pullback_score":pullback_pts,"pullback_signal":pullback_signal,"pullback_rows":pullback_rows,
+        "momentum_score":momentum_pts,"momentum_signal":momentum_signal,"momentum_rows":momentum_rows,
+        "cherry_points":comp["cherryPoints"],"entry_mode":comp["entryMode"],"entry_signal":comp["signal"],
         "sell_score":sell_score,"sell_signal":sell_signal,"sell_breakdown":sell_breakdown,
-        "is_buy":buy_score>=75,"is_moderate_buy":buy_score>=60,
+        "is_buy":comp["cherryPoints"]>=75,"is_moderate_buy":comp["cherryPoints"]>=60,
+        "is_momentum":momentum_pts>=60,"is_pullback":pullback_pts>=60,
         "is_sell":sell_score>=65,"is_moderate_sell":sell_score>=45,
         "golden_buy":golden_buy,
     }
@@ -728,9 +747,9 @@ def run_nifty_scan():
             if len(all_s) % 10 == 0:
                 scan_results[mkt].update({
                     "total_scanned": len(all_s),
-                    "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+                    "buy_signals": sorted(buys, key=lambda x: x["cherry_points"], reverse=True),
                     "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
-                    "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+                    "all_stocks": sorted(all_s, key=lambda x: x["cherry_points"], reverse=True),
                 })
 
             time.sleep(current_pace)
@@ -797,9 +816,9 @@ def run_nifty_scan():
     scan_results[mkt] = {
         "last_scan": datetime.now().isoformat(), "status": "complete",
         "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
-        "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+        "buy_signals": sorted(buys, key=lambda x: x["cherry_points"], reverse=True),
         "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
-        "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+        "all_stocks": sorted(all_s, key=lambda x: x["cherry_points"], reverse=True),
         "portfolio_holdings": portfolio, "errors": errs,
     }
     logger.info(f"NIFTY SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys")
@@ -864,9 +883,9 @@ def run_nasdaq_scan():
             if len(all_s) % 10 == 0:
                 scan_results[mkt].update({
                     "total_scanned": len(all_s),
-                    "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+                    "buy_signals": sorted(buys, key=lambda x: x["cherry_points"], reverse=True),
                     "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
-                    "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+                    "all_stocks": sorted(all_s, key=lambda x: x["cherry_points"], reverse=True),
                 })
 
             time.sleep(0.6)  # pacing for Yahoo
@@ -910,9 +929,9 @@ def run_nasdaq_scan():
     scan_results[mkt] = {
         "last_scan": datetime.now().isoformat(), "status": "complete",
         "scan_duration_sec": round(elapsed,1), "total_scanned": len(all_s),
-        "buy_signals": sorted(buys, key=lambda x: x["buy_score"], reverse=True),
+        "buy_signals": sorted(buys, key=lambda x: x["cherry_points"], reverse=True),
         "sell_signals": sorted(sells, key=lambda x: x["sell_score"], reverse=True),
-        "all_stocks": sorted(all_s, key=lambda x: x["buy_score"], reverse=True),
+        "all_stocks": sorted(all_s, key=lambda x: x["cherry_points"], reverse=True),
         "portfolio_holdings": [], "errors": errs,
     }
     logger.info(f"NASDAQ SCAN DONE in {elapsed/60:.1f}min — {len(all_s)} stocks, {len(buys)} buys")
@@ -957,6 +976,207 @@ def scheduler():
         if wd and now.hour == 20 and now.minute < 20:
             run_full_scan(["nasdaq100"])
         time.sleep(SCAN_INTERVAL)
+
+# ═══════════════════════════════════════════════════════════════
+# VALUE (fundamentals) + AI (news + LLM) — all ON-DEMAND
+# These are intentionally NOT run during bulk scans: fetching fundamentals
+# and news for 500+ stocks would blow the Yahoo rate limits and cost tokens.
+# ═══════════════════════════════════════════════════════════════
+
+# marketLabel / currency / analyst persona per scan universe (spec §6)
+MARKET_CONTEXT = {
+    "nifty500":  {"label": "NSE India",  "currency": "₹", "persona": "Indian equity investors"},
+    "nasdaq100": {"label": "US Markets", "currency": "$", "persona": "US equity investors"},
+}
+
+def _market_context(market):
+    return MARKET_CONTEXT.get(market, MARKET_CONTEXT["nasdaq100"])
+
+def _find_scan_stock(symbol, market=None):
+    """Locate a previously-scanned stock (for its price/name/ownership/yf ticker)."""
+    markets = [market] if market else list(scan_results.keys())
+    for mkt in markets:
+        for s in scan_results.get(mkt, {}).get("all_stocks", []):
+            if symbol in (s.get("symbol"), s.get("name"), s.get("token"),
+                          str(s.get("symbol", "")).replace("-EQ", "")):
+                return s, mkt
+    return None, market
+
+def fetch_fundamentals(yf_ticker):
+    """
+    Fetch Yahoo fundamentals via yfinance and normalize to scoring.value_score's
+    contract. Returns (fundamentals_dict, price, sector) or (None, None, None).
+    """
+    try:
+        import yfinance as yf
+        info = yf.Ticker(yf_ticker).info or {}
+    except Exception as e:
+        logger.warning(f"Fundamentals fetch failed for {yf_ticker}: {e}")
+        return None, None, None
+
+    if not info or info.get("regularMarketPrice") is None and info.get("currentPrice") is None:
+        return None, None, None
+
+    def pct(v):   # yfinance fraction (0.10) → percent (10.0)
+        return v * 100 if isinstance(v, (int, float)) else None
+    def div_pct(v):
+        if not isinstance(v, (int, float)):
+            return None
+        return v * 100 if v < 1 else v  # yfinance versions differ; normalize to percent
+    def ratio_de(v):
+        return v / 100.0 if isinstance(v, (int, float)) else None  # yfinance D/E is a percent
+
+    f = {
+        "trailingPE": info.get("trailingPE"),
+        "forwardPE": info.get("forwardPE"),
+        "priceToBook": info.get("priceToBook"),
+        "enterpriseToEbitda": info.get("enterpriseToEbitda"),
+        "debtToEquity": ratio_de(info.get("debtToEquity")),
+        "returnOnEquity": info.get("returnOnEquity"),          # fraction (scoring ×100)
+        "operatingCashflow": info.get("operatingCashflow"),
+        "freeCashflow": info.get("freeCashflow"),
+        "netIncome": info.get("netIncomeToCommon"),
+        "totalRevenue": info.get("totalRevenue"),
+        "totalCash": info.get("totalCash"),
+        "totalDebt": info.get("totalDebt"),
+        "currentRatio": info.get("currentRatio"),
+        "revenueGrowth": pct(info.get("revenueGrowth")),
+        "earningsGrowth": pct(info.get("earningsGrowth")),
+        "grossMargins": pct(info.get("grossMargins")),
+        "operatingMargins": pct(info.get("operatingMargins")),
+        "profitMargins": pct(info.get("profitMargins")),
+        "dividendYield": div_pct(info.get("dividendYield")),
+        "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
+    }
+    price = info.get("currentPrice") or info.get("regularMarketPrice")
+    return f, price, info.get("sector")
+
+def _strip_exchange_suffix(ticker):
+    for suf in (".NS", ".BO", ".DE", ".NSE", ".BSE"):
+        if ticker.endswith(suf):
+            return ticker[: -len(suf)]
+    return ticker
+
+def fetch_news_headlines(ticker, name=None, market=None, limit=12, days=30):
+    """
+    Pull recent headlines from Google News RSS (no API key). Returns a list of
+    {"title","pubDate"} dicts, most-recent-first, from the last `days` days.
+    """
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    base = _strip_exchange_suffix(ticker)
+    q = base
+    if name and name.upper() != base.upper():
+        q = f"{base} {name}"
+    q = f"{q} stock"
+    url = "https://news.google.com/rss/search"
+    params = {"q": q, "hl": "en-US", "gl": "US", "ceid": "US:en"}
+    try:
+        resp = requests.get(url, params=params, timeout=12,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code != 200:
+            return []
+        root = ET.fromstring(resp.content)
+        cutoff = datetime.now().astimezone() - timedelta(days=days)
+        items = []
+        for item in root.iter("item"):
+            title = item.findtext("title") or ""
+            pub = item.findtext("pubDate") or ""
+            try:
+                dt = parsedate_to_datetime(pub)
+                if dt is None:
+                    continue
+                if dt.tzinfo is None:
+                    dt = dt.astimezone()
+                if dt < cutoff:
+                    continue
+            except Exception:
+                continue
+            items.append({"title": title.strip(), "pubDate": pub, "_dt": dt})
+        items.sort(key=lambda x: x["_dt"], reverse=True)
+        return [{"title": i["title"], "pubDate": i["pubDate"]} for i in items[:limit]]
+    except Exception as e:
+        logger.debug(f"News fetch error {ticker}: {e}")
+        return []
+
+def call_llm(system, user, max_tokens=500):
+    """Dispatch to the configured AI provider. Returns text, or raises RuntimeError."""
+    if AI_PROVIDER == "openai":
+        return _call_openai(system, user, max_tokens)
+    return _call_anthropic(system, user, max_tokens)
+
+def _call_openai(system, user, max_tokens=500):
+    """Call the OpenAI Chat Completions API (ChatGPT)."""
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not configured — set it in .env to enable AI features")
+    try:
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENAI_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.2,
+            },
+            timeout=60,
+        )
+        data = resp.json()
+        if resp.status_code != 200:
+            raise RuntimeError((data.get("error") or {}).get("message", f"HTTP {resp.status_code}"))
+        return (data["choices"][0]["message"]["content"] or "").strip()
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"AI request failed: {e}")
+
+def _call_anthropic(system, user, max_tokens=500):
+    """Call the Anthropic Messages API (Claude)."""
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY not configured — set it in .env to enable AI features")
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": AI_MODEL,
+                "max_tokens": max_tokens,
+                "temperature": 0.2,
+                "system": system,
+                "messages": [{"role": "user", "content": user}],
+            },
+            timeout=60,
+        )
+        data = resp.json()
+        if resp.status_code != 200:
+            raise RuntimeError(data.get("error", {}).get("message", f"HTTP {resp.status_code}"))
+        parts = data.get("content", [])
+        return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"AI request failed: {e}")
+
+def _rsi_status(rsi):
+    if rsi < 30: return "oversold — may bounce soon"
+    if rsi < 50: return "mid-range — pullback zone ideal"
+    if rsi < 70: return "near exhaustion — caution on further bounce"
+    return "overbought — unusual for a pullback"
+
+def _adx_status(adx):
+    if adx > 25: return "trending"
+    if adx > 15: return "emerging trend"
+    return "choppy"
 
 # ═══════════════════════════════════════════════════════════════
 # ROUTES
@@ -1161,6 +1381,146 @@ def api_sectors():
             results.append({"symbol": sec["symbol"], "name": sec["name"],
                             "sector": sec["sector"], "error": True})
     return jsonify(results)
+
+# ── AI / VALUE endpoints (on-demand) ──
+
+@app.route("/api/ai/config")
+def api_ai_config():
+    """Frontend uses this to know whether to show AI buttons."""
+    return jsonify({"ai_enabled": ai_is_enabled(), "provider": AI_PROVIDER, "model": ai_active_model()})
+
+@app.route("/api/value")
+def api_value():
+    """Compute the fundamental Value score (spec §4) for one symbol, on demand."""
+    symbol = request.args.get("symbol", "").strip()
+    market = request.args.get("market", None)
+    if not symbol:
+        return jsonify({"error": "symbol required"}), 400
+    stock, mkt = _find_scan_stock(symbol, market)
+    yf_ticker = (stock or {}).get("token") or symbol
+    f, price, sector = fetch_fundamentals(yf_ticker)
+    if f is None:
+        return jsonify({"error": f"No fundamentals available for {symbol}"}), 404
+    if not price and stock:
+        price = stock.get("price")
+    score, rating, rows = scoring.value_score(f, price or 0.0)
+    return jsonify({"symbol": symbol, "market": mkt, "sector": sector,
+                    "score": score, "rating": rating, "rows": rows, "price": price})
+
+@app.route("/api/ai/pullback", methods=["POST"])
+def api_ai_pullback():
+    """AI Pullback Analysis (spec §5): TEMPORARY / STRUCTURAL / UNCERTAIN."""
+    body = request.get_json() or {}
+    symbol = (body.get("symbol") or "").strip()
+    market = body.get("market")
+    if not symbol:
+        return jsonify({"error": "symbol required"}), 400
+    stock, mkt = _find_scan_stock(symbol, market)
+    if not stock:
+        return jsonify({"error": f"{symbol} not found in scan results — run a scan first"}), 404
+    ctx = _market_context(mkt)
+    name = stock.get("name", symbol)
+    ticker = _strip_exchange_suffix(stock.get("token") or symbol)
+    headlines = fetch_news_headlines(stock.get("token") or symbol, name, mkt)
+    if not headlines:
+        return jsonify({"error": f"No recent news found for {symbol}"}), 404
+
+    price = stock.get("price") or 0.0
+    rsi = stock.get("rsi") or 0.0
+    adx = stock.get("adx") or 0.0
+    support = stock.get("support") or 0.0
+    pct_above_support = ((price - support) / support * 100) if support else 0.0
+    news_block = "\n".join(f"[{i+1}] {h['title']}" for i, h in enumerate(headlines))
+
+    system = (
+        "You are a stock market analyst. Analyze a deep pullback critically and independently.\n"
+        "Form your own opinion based PRIMARILY on recent news (headlines appear in chronological order, most recent first).\n"
+        "Do NOT assume the pullback is automatically a buying opportunity — critically assess both risks and opportunities.\n\n"
+        "Evaluate whether this pullback is:\n"
+        "• TEMPORARY: A healthy correction in an uptrend; news suggests a one-off event or overreaction\n"
+        "• STRUCTURAL: Signs of fundamental weakness; news suggests deteriorating business/sector conditions\n"
+        "• UNCERTAIN: Conflicting signals; need more confirmation before committing\n\n"
+        "Prioritize recent news over older stories. Be concise (3-4 sentences max). If you're unsure, answer UNCERTAIN rather than guessing."
+    )
+    user = (
+        f"Stock: {name} ({ticker}) ({ctx['label']})\n"
+        f"Current price: {ctx['currency']}{price:.2f}\n"
+        f"EMA(21) distance: {stock.get('ema21_pct_diff', 0):.1f}% (deep pullback trigger)\n"
+        f"MACD Phase: {stock.get('macd_phase', 'N/A')}\n\n"
+        f"─ Technical Context ─\n"
+        f"RSI = {rsi:.0f} ({_rsi_status(rsi)})\n"
+        f"ADX = {adx:.1f} ({_adx_status(adx)})\n"
+        f"Price is {pct_above_support:.1f}% above support ({ctx['currency']}{support:.2f})\n\n"
+        f"─ Recent News Headlines (last 30 days) ─\n{news_block}\n\n"
+        "Analyze critically:\n"
+        "• Based on the news, what is the PRIMARY driver of this pullback?\n"
+        "• Is this a temporary market overreaction or structural weakness?\n"
+        "• What would need to happen for this to be a BUY vs AVOID?\n"
+        "• If uncertain, say UNCERTAIN rather than guessing.\n\n"
+        "Provide your verdict: TEMPORARY, STRUCTURAL, or UNCERTAIN."
+    )
+    try:
+        text = call_llm(system, user, max_tokens=500)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    return jsonify({"symbol": symbol, "analysis": text, "headlines": headlines})
+
+@app.route("/api/ai/outlook", methods=["POST"])
+def api_ai_outlook():
+    """AI Stock Outlook (spec §6): structured outlook + verdict."""
+    body = request.get_json() or {}
+    symbol = (body.get("symbol") or "").strip()
+    market = body.get("market")
+    if not symbol:
+        return jsonify({"error": "symbol required"}), 400
+    stock, mkt = _find_scan_stock(symbol, market)
+    ctx = _market_context(mkt)
+    name = (stock or {}).get("name", symbol)
+    ticker = _strip_exchange_suffix((stock or {}).get("token") or symbol)
+    owned = bool(body.get("owned", (stock or {}).get("in_portfolio", False)))
+    price = (stock or {}).get("price") or 0.0
+
+    headlines = fetch_news_headlines((stock or {}).get("token") or symbol, name, mkt)
+
+    if owned:
+        allowed = "STRONG BUY / BUY / HOLD / REDUCE / SELL"
+        hold_rule = "HOLD is allowed because the user currently owns this stock."
+    else:
+        allowed = "STRONG BUY / BUY / WATCH / AVOID"
+        hold_rule = ("HOLD is NOT a valid verdict — the user does NOT own this stock, so you must "
+                     "commit to a directional call (BUY / WATCH / AVOID). Do not output HOLD under any circumstances.")
+    system = (
+        f"You are a stock market analyst providing outlook summaries for {ctx['persona']}.\n"
+        "Form your own independent opinion based PRIMARILY on recent news and publicly known fundamentals.\n"
+        "Headlines are listed in chronological order (most recent first) — prioritize those heavily over older news.\n"
+        "Do NOT assume any prior bullish or bearish bias — you are given current price, ownership status, and headlines only. Critically assess both risks and opportunities.\n"
+        "Do not infer or mention app technical indicators unless they are explicitly present in the news headlines.\n\n"
+        "Give a structured response:\n"
+        "1. SHORT TERM (1-4 weeks): News-driven outlook\n"
+        "2. LONG TERM (3-12 months): Fundamental narrative from recent news and publicly known context\n"
+        "3. KEY RISKS: 1-2 bullet points from recent developments\n"
+        f"4. VERDICT: One of: {allowed}\n\n"
+        f"{hold_rule}\n\n"
+        "Keep each section to 2-3 sentences max. Be specific about price levels when possible."
+    )
+    if headlines:
+        news_block = "\n".join(f"[{i+1}] {h['title']}" for i, h in enumerate(headlines))
+    else:
+        news_block = ("(No recent news available via Google News RSS — rely on general market knowledge of this "
+                      "company, and note the absence of news in your response)")
+    user = (
+        f"Stock: {name} ({ticker}) ({ctx['label']})\n"
+        f"Current Price: {ctx['currency']}{price:.2f}\n"
+        f"User currently owns this: {'YES' if owned else 'NO'}\n\n"
+        f"── Recent News Headlines (prioritize items from the last 30 days) ──\n{news_block}\n\n"
+        "Based on the above, provide the structured outlook. Cite headline numbers inline where relevant. "
+        f"{'Remember: HOLD is NOT a valid verdict here. ' if not owned else ''}Do not reference any app-generated scoring."
+    )
+    try:
+        text = call_llm(system, user, max_tokens=500)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    return jsonify({"symbol": symbol, "outlook": text, "owned": owned, "headlines": headlines})
 
 @app.route("/")
 def serve_frontend():

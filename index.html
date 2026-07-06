@@ -68,7 +68,9 @@ table{width:100%;border-collapse:collapse;font-size:13px}thead{position:sticky;t
 th{padding:9px 10px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);background:var(--bg2);border-bottom:1px solid var(--bd);white-space:nowrap;cursor:pointer}
 td{padding:10px;border-bottom:1px solid var(--bd);white-space:nowrap;font-family:'JetBrains Mono',monospace;font-size:13px}
 tr{transition:background .1s}tr:hover{background:var(--cdh)}
-.sn{font-family:'DM Sans',sans-serif}.sns{font-weight:700;font-size:14px;color:var(--t1)}.snn{font-size:11px;color:var(--t3)}
+.sn{font-family:'DM Sans',sans-serif;max-width:200px;overflow:hidden}.sns{font-weight:700;font-size:13px;color:var(--t1);display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}.snn{font-size:10px;color:var(--t3);display:block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.stockcell{max-width:200px}
+input[type=range]{accent-color:#059669;height:4px;cursor:pointer;width:100%}
 .pb{display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;background:rgba(124,58,237,.08);color:var(--pu);margin-left:4px}
 .itag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;margin-left:3px}
 .itag-n50{background:rgba(124,58,237,.1);color:#7c3aed}
@@ -155,9 +157,32 @@ const MARKETS={
 function loadWL(){try{return JSON.parse(localStorage.getItem('ss_watchlists'))||{}}catch(e){return{}}}
 function saveWL(w){localStorage.setItem('ss_watchlists',JSON.stringify(w))}
 
-function ITags({indices}){
+function ITags({indices,max}){
   if(!indices||!indices.length)return null;
-  return React.createElement(React.Fragment,null,indices.map(function(i){return React.createElement('span',{key:i,className:'itag '+(ITAG_CLS[i]||'')},i)}));
+  var m=max||3;
+  var shown=indices.slice(0,m);
+  var extra=indices.length-shown.length;
+  var els=shown.map(function(i){return React.createElement('span',{key:i,className:'itag '+(ITAG_CLS[i]||'')},i)});
+  if(extra>0)els.push(React.createElement('span',{key:'_more',className:'itag',style:{background:'rgba(148,163,184,.15)',color:'#64748b'}},'+'+extra));
+  return React.createElement(React.Fragment,null,els);
+}
+
+/* Compact price sparkline for the discovery table (252-day close line) */
+function PriceSpark({data}){
+  if(!data||data.length<2)return <span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>;
+  var w=72,h=26;
+  var mn=Math.min.apply(null,data),mx=Math.max.apply(null,data),rng=(mx-mn)||1;
+  var pts=data.map(function(v,i){return (i/(data.length-1))*w+','+(h-(v-mn)/rng*h).toFixed(2)});
+  var pathD='M'+pts.join(' L');
+  var isUp=data[data.length-1]>=data[0];
+  var col=isUp?'#059669':'#dc2626';
+  var chg=data[0]>0?((data[data.length-1]-data[0])/data[0]*100):0;
+  return <div style={{display:'flex',alignItems:'center',gap:'5px'}} title={'252-day: '+(chg>=0?'+':'')+chg.toFixed(1)+'%'}>
+    <svg width={w} height={h} viewBox={'0 0 '+w+' '+h} preserveAspectRatio="none" style={{display:'block',flexShrink:0}}>
+      <path d={pathD} fill="none" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+    <span style={{fontSize:'9px',fontFamily:"'JetBrains Mono'",color:col,fontWeight:700}}>{(chg>=0?'+':'')+chg.toFixed(0)+'%'}</span>
+  </div>;
 }
 
 function RR({ratio}){
@@ -415,9 +440,18 @@ function IndexChart({market,overrideSymbol}){
 
 /* ═══ Stock Detail Modal (same as before, abbreviated for space) ═══ */
 function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
+  var [valData,setValData]=useState(null),[valLoading,setValLoading]=useState(false),[valErr,setValErr]=useState(null);
+  var [aiEnabled,setAiEnabled]=useState(false),[aiProvider,setAiProvider]=useState('openai');
+  var [aiPB,setAiPB]=useState(null),[aiPBLoad,setAiPBLoad]=useState(false),[aiPBErr,setAiPBErr]=useState(null);
+  var [aiOL,setAiOL]=useState(null),[aiOLLoad,setAiOLLoad]=useState(false),[aiOLErr,setAiOLErr]=useState(null);
+  useEffect(function(){fetch(API+'/api/ai/config').then(function(r){return r.json()}).then(function(d){setAiEnabled(!!d.ai_enabled);if(d.provider)setAiProvider(d.provider)}).catch(function(){})},[]);
   if(!s)return null;
-  var bb=s.buy_breakdown||{};
-  var indicators=["sma200","macd_inflection","rsi","bollinger","adx","obv","ema21"];
+  var sym=s.symbol,mkt=s.market||'';
+  var loadValue=function(){setValLoading(true);setValErr(null);fetch(API+'/api/value?symbol='+encodeURIComponent(sym)+'&market='+mkt).then(function(r){return r.json()}).then(function(d){if(d.error)setValErr(d.error);else setValData(d)}).catch(function(){setValErr('Network error')}).finally(function(){setValLoading(false)})};
+  var loadAiPB=function(){setAiPBLoad(true);setAiPBErr(null);fetch(API+'/api/ai/pullback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,market:mkt})}).then(function(r){return r.json()}).then(function(d){if(d.error)setAiPBErr(d.error);else setAiPB(d.analysis)}).catch(function(){setAiPBErr('Network error')}).finally(function(){setAiPBLoad(false)})};
+  var loadAiOL=function(){setAiOLLoad(true);setAiOLErr(null);fetch(API+'/api/ai/outlook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,market:mkt,owned:s.in_portfolio})}).then(function(r){return r.json()}).then(function(d){if(d.error)setAiOLErr(d.error);else setAiOL(d.outlook)}).catch(function(){setAiOLErr('Network error')}).finally(function(){setAiOLLoad(false)})};
+  var pbRows=s.pullback_rows||[],moRows=s.momentum_rows||[];
+  var stColor=function(st){return st==='pass'?'var(--gn)':st==='partial'?'var(--am)':'var(--rd)'};
   var wlNames=Object.keys(watchlists);
   var pc=PH_COL[s.macd_phase]||'var(--t3)';
   var cur=s.currency||'₹';
@@ -438,18 +472,55 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
       {isGolden && <div style={{padding:'12px',marginBottom:'12px',background:'linear-gradient(135deg,rgba(217,119,6,.1),rgba(234,179,8,.08))',border:'2px solid rgba(217,119,6,.3)',borderRadius:'8px',textAlign:'center'}}>
         <div style={{fontSize:'18px',fontWeight:800,color:'#b45309'}}>{'★ GOLDEN BUY OPPORTUNITY ★'}</div>
       </div>}
-      <div style={{display:'flex',gap:'10px',marginBottom:'16px'}}>
+      <div style={{display:'flex',gap:'8px',marginBottom:'8px'}}>
         <div style={{flex:1,padding:'14px',background:'var(--gg)',borderRadius:'8px',textAlign:'center'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--gn)',letterSpacing:'.5px'}}>BUY SCORE</div>
-          <div style={{fontSize:'36px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--gn)'}}>{s.buy_score}</div>
-          <div style={{fontSize:'10px',color:'var(--gn)',fontWeight:600}}>{s.buy_signal}</div>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--gn)',letterSpacing:'.5px'}}>MOMENTUM</div>
+          <div style={{fontSize:'34px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--gn)'}}>{s.momentum_score!=null?s.momentum_score:'—'}</div>
+          <div style={{fontSize:'10px',color:'var(--gn)',fontWeight:600}}>{s.momentum_signal||'NO SIGNAL'}</div>
+        </div>
+        <div style={{flex:1,padding:'14px',background:'rgba(139,92,246,.10)',borderRadius:'8px',textAlign:'center'}}>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--pu)',letterSpacing:'.5px'}}>PULLBACK</div>
+          <div style={{fontSize:'34px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--pu)'}}>{s.pullback_score!=null?s.pullback_score:'—'}</div>
+          <div style={{fontSize:'10px',color:'var(--pu)',fontWeight:600}}>{s.pullback_signal||'NO SIGNAL'}</div>
         </div>
         <div style={{flex:1,padding:'14px',background:'var(--rg)',borderRadius:'8px',textAlign:'center'}}>
-          <div style={{fontSize:'9px',fontWeight:700,color:'var(--rd)',letterSpacing:'.5px'}}>SELL SCORE</div>
-          <div style={{fontSize:'36px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--rd)'}}>{s.sell_score||0}</div>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--rd)',letterSpacing:'.5px'}}>SELL</div>
+          <div style={{fontSize:'34px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:'var(--rd)'}}>{s.sell_score||0}</div>
           <div style={{fontSize:'10px',color:'var(--rd)',fontWeight:600}}>{s.sell_signal||'NO SIGNAL'}</div>
         </div>
       </div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',marginBottom:'16px',padding:'8px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <span style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px'}}>COMPOSITE</span>
+        <span style={{fontSize:'13px',fontWeight:800,color:(s.cherry_points>=75?'var(--gn)':s.cherry_points>=60?'var(--am)':'var(--t3)')}}>{s.entry_signal||'NO SIGNAL'}</span>
+        <span style={{fontSize:'10px',color:'var(--t3)'}}>{'· '+(s.entry_mode||'NONE')+' · '+(s.cherry_points!=null?s.cherry_points+' pts':'')}</span>
+      </div>
+      {/* 252-day price line (ported from the Android app) */}
+      {(function(){
+        var ph=s.price_history||[];
+        if(ph.length<2)return null;
+        var W=520,H=90;
+        var mn=Math.min.apply(null,ph),mx=Math.max.apply(null,ph),rng=(mx-mn)||1;
+        var pts=ph.map(function(v,i){return (i/(ph.length-1))*W+','+(H-(v-mn)/rng*H).toFixed(2)});
+        var pathD='M'+pts.join(' L');
+        var isUp=ph[ph.length-1]>=ph[0];
+        var col=isUp?'var(--gn)':'var(--rd)';
+        var chg=ph[0]>0?((ph[ph.length-1]-ph[0])/ph[0]*100):0;
+        return <div style={{marginBottom:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
+            <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px'}}>252-DAY PRICE</div>
+            <div style={{display:'flex',gap:'10px',alignItems:'baseline'}}>
+              <span style={{fontSize:'9px',color:'var(--t3)'}}>{cur+fmt(mn)+' – '+cur+fmt(mx)}</span>
+              <span style={{fontSize:'11px',fontWeight:700,color:col}}>{(chg>=0?'+':'')+chg.toFixed(1)+'%'}</span>
+            </div>
+          </div>
+          <svg width="100%" height={H} viewBox={'0 0 '+W+' '+H} preserveAspectRatio="none" style={{display:'block'}}>
+            <defs><linearGradient id="phgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity="0.18"/><stop offset="100%" stopColor={col} stopOpacity="0.01"/></linearGradient></defs>
+            <path d={pathD+' L'+W+','+H+' L0,'+H+' Z'} fill="url(#phgrad)"/>
+            <path d={pathD} fill="none" stroke={col} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <circle cx={W} cy={(H-(ph[ph.length-1]-mn)/rng*H).toFixed(2)} r="3" fill={col}/>
+          </svg>
+        </div>;
+      })()}
       <div className="sr-row">
         <div className="sr-item"><div className="sr-label">Support</div><div className="sr-val" style={{color:'var(--gn)'}}>{cur}{fmt(s.support)}</div></div>
         <div className="sr-item"><div className="sr-label">Resistance</div><div className="sr-val" style={{color:'var(--rd)'}}>{cur}{fmt(s.resistance)}</div></div>
@@ -533,10 +604,48 @@ function Modal({s,onClose,watchlists,onAddToWL,isGolden}){
           <div><div style={{fontSize:'8px',color:'var(--t3)'}}>Up streak</div><div style={{fontSize:'16px',fontWeight:700,fontFamily:"'JetBrains Mono'",color:(s.up_days||0)>=3?'var(--gn)':'var(--t2)'}}>{(s.up_days||0)+' days'}</div></div>
         </div>
       </div>
-      <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--gn)',margin:'16px 0 8px'}}>BUY INDICATORS</h3>
-      <div className="ig" style={{marginBottom:'16px'}}>{indicators.map(function(k){var b=bb[k];if(!b)return null;var pct=b.max>0?(b.pts/b.max*100):0;
-        return <div className="ic" key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span className={'ics '+(b.pass?'p':'f')}>{b.pts+'/'+b.max}</span></div><div className="icv">{b.val!=null?b.val:'—'}</div><div className="sbar"><div className="sbar-f" style={{width:pct+'%',background:b.pass?'var(--gn)':'var(--rd)'}}/></div><div className="icd">{b.desc}</div></div>
-      })}</div>
+      {(function(){
+        var renderRows=function(title,rows,accent){
+          return <div>
+            <h3 style={{fontSize:'11px',fontWeight:700,color:accent,margin:'16px 0 8px'}}>{title}</h3>
+            <div className="ig" style={{marginBottom:'8px'}}>{rows.map(function(b,i){var pct=b.max>0?Math.round(b.points/b.max*100):0;var col=stColor(b.status);
+              return <div className="ic" key={i}><div className="ich"><span className="ict">{b.name}</span><span style={{fontSize:'9px',fontWeight:700,color:col}}>{b.points+'/'+b.max}</span></div><div className="sbar"><div className="sbar-f" style={{width:pct+'%',background:col}}/></div><div className="icd">{b.reason}</div></div>
+            })}</div>
+          </div>;
+        };
+        return <div>
+          {moRows.length>0&&renderRows('MOMENTUM — why this score?',moRows,'var(--gn)')}
+          {pbRows.length>0&&renderRows('PULLBACK — why this score?',pbRows,'var(--pu)')}
+        </div>;
+      })()}
+      {/* FUNDAMENTAL VALUE (on-demand) */}
+      <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px'}}>FUNDAMENTAL VALUE</div>
+          <button className="btn btn-sm btn-pu" onClick={loadValue} disabled={valLoading}>{valLoading?'Loading…':(valData?'↻ Refresh':'Compute Value Score')}</button>
+          {valData&&<span style={{fontSize:'20px',fontWeight:800,fontFamily:"'JetBrains Mono'",color:valData.score>=65?'var(--gn)':valData.score>=50?'var(--am)':'var(--t3)'}}>{valData.score}</span>}
+          {valData&&<span style={{fontSize:'11px',fontWeight:700,color:'var(--t2)'}}>{valData.rating+(valData.sector?' · '+valData.sector:'')}</span>}
+        </div>
+        {valErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginTop:'6px'}}>{valErr}</div>}
+        {valData&&valData.rows&&<div className="ig" style={{marginTop:'8px'}}>{valData.rows.map(function(b,i){var pct=b.max>0?Math.round(b.points/b.max*100):0;var col=stColor(b.status);
+          return <div className="ic" key={i}><div className="ich"><span className="ict">{b.name}</span><span style={{fontSize:'9px',fontWeight:700,color:col}}>{b.points+'/'+b.max}</span></div>{b.max>0&&<div className="sbar"><div className="sbar-f" style={{width:pct+'%',background:col}}/></div>}<div className="icd">{b.reason}</div></div>
+        })}</div>}
+      </div>
+      {/* AI ANALYSIS (on-demand — always shown; buttons disabled until server has an API key) */}
+      <div style={{marginTop:'12px',padding:'12px',background:'var(--bg2)',border:'1px solid var(--bd)',borderRadius:'8px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+          <div style={{fontSize:'9px',fontWeight:700,color:'var(--t3)',letterSpacing:'.5px'}}>{'AI ANALYSIS'+(aiEnabled?' · '+aiProvider:'')}</div>
+          {!aiEnabled&&<span style={{fontSize:'9px',fontWeight:600,color:'var(--am)'}}>{'set '+(aiProvider==='anthropic'?'ANTHROPIC_API_KEY':'OPENAI_API_KEY')+' in .env to enable'}</span>}
+        </div>
+        <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'8px'}}>
+          <button className="btn btn-sm btn-g" onClick={loadAiPB} disabled={!aiEnabled||aiPBLoad} style={!aiEnabled?{opacity:.5,cursor:'not-allowed'}:{}} title={aiEnabled?'Is this dip temporary or structural? (news + LLM)':'Add your API key to .env'}>{aiPBLoad?'Analyzing…':'🔍 Pullback Analysis'}</button>
+          <button className="btn btn-sm btn-pu" onClick={loadAiOL} disabled={!aiEnabled||aiOLLoad} style={!aiEnabled?{opacity:.5,cursor:'not-allowed'}:{}} title={aiEnabled?'Short/long-term outlook + BUY/WATCH/AVOID verdict (news + LLM)':'Add your API key to .env'}>{aiOLLoad?'Analyzing…':'📰 Stock Outlook'}</button>
+        </div>
+        {aiPBErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginBottom:'6px'}}>{aiPBErr}</div>}
+        {aiPB&&<div style={{fontSize:'12px',lineHeight:'1.5',color:'var(--t2)',whiteSpace:'pre-wrap',background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'6px',padding:'10px',marginBottom:'8px'}}>{aiPB}</div>}
+        {aiOLErr&&<div style={{fontSize:'11px',color:'var(--rd)',marginBottom:'6px'}}>{aiOLErr}</div>}
+        {aiOL&&<div style={{fontSize:'12px',lineHeight:'1.5',color:'var(--t2)',whiteSpace:'pre-wrap',background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'6px',padding:'10px'}}>{aiOL}</div>}
+      </div>
       <h3 style={{fontSize:'11px',fontWeight:700,color:'var(--rd)',marginBottom:'8px'}}>SELL INDICATORS</h3>
       <div className="ig">{["sma_break","macd_inflection","rsi","bollinger","adx","obv"].map(function(k){var b=(s.sell_breakdown||{})[k];if(!b)return null;return <div className="ic" key={k}><div className="ich"><span className="ict">{k.toUpperCase()}</span><span style={{fontSize:'9px',fontWeight:700,color:b.pass?'var(--rd)':'var(--t3)'}}>{b.pts+'/'+b.max}</span></div>{b.pass&&<div style={{height:'4px',borderRadius:'2px',background:'var(--rg)',overflow:'hidden',marginBottom:'4px'}}><div style={{width:Math.round(b.pts/b.max*100)+'%',height:'100%',background:'var(--rd)',borderRadius:'2px'}}/></div>}<div className="icd" style={{fontSize:'10px',color:b.pass?'var(--t2)':'var(--t3)'}}>{b.desc}</div></div>})}</div>
     </div>
@@ -666,8 +775,13 @@ function App(){
   var [progress,setProgress]=useState(null);
   var [tab,setTab]=useState('all');
   var [search,setSearch]=useState('');
-  var [sortK,setSortK]=useState('buy_score');
+  var [sortK,setSortK]=useState('cherry_points');
   var [sortA,setSortA]=useState(false);
+  // Setups tab: adjustable MACD filter (find just-flipped, still-low MACD)
+  var [macdSlopeMin,setMacdSlopeMin]=useState(-0.1);
+  var [macdSlopeMax,setMacdSlopeMax]=useState(0.5);
+  var [macdPctlMax,setMacdPctlMax]=useState(30);
+  var [setupUptrend,setSetupUptrend]=useState(false);
   var [sel,setSel]=useState(null);
   var [watchlists,setWatchlists]=useState(loadWL);
   var [activeWL,setActiveWL]=useState(null);
@@ -782,17 +896,19 @@ function App(){
   var cur=mktConf?mktConf.currency:'₹';
   var prog=progress&&progress[market]?progress[market]:{};
 
+  var matchSetup=function(s){
+    var slopeOk=typeof s.macd_slope==='number'&&s.macd_slope>=macdSlopeMin&&s.macd_slope<=macdSlopeMax;
+    var pctlOk=typeof s.macd_pctl==='number'?s.macd_pctl<=macdPctlMax:true;
+    var upOk=!setupUptrend||(typeof s.sma200==='number'&&s.price>s.sma200);
+    return slopeOk&&pctlOk&&upOk;
+  };
+
   var stocks=useMemo(function(){
     if(!data)return[];
     var l=tab==='buy'?(data.buy_signals||[])
       :tab==='sell'?(data.sell_signals||[])
       :tab==='port'?allStocks.filter(function(s){return s.in_portfolio})
-      :tab==='setups'?allStocks.filter(function(s){
-        if(goldenMatch(s))return true;
-        var smaOk=s.buy_breakdown&&s.buy_breakdown.sma200&&s.buy_breakdown.sma200.pass;
-        var macdOk=s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY';
-        return smaOk&&macdOk;
-      })
+      :tab==='setups'?allStocks.filter(matchSetup)
       :allStocks;
     if(activeWL){
       var syms=watchlists[activeWL]||[];
@@ -800,13 +916,13 @@ function App(){
     }
     if(search){var q=search.toLowerCase();l=l.filter(function(s){return s.symbol.toLowerCase().includes(q)||s.name.toLowerCase().includes(q)})}
     return l.slice().sort(function(a,b){var va=a[sortK],vb=b[sortK];if(va==null)return 1;if(vb==null)return-1;return sortA?(va>vb?1:-1):(va<vb?1:-1)});
-  },[data,activeWL,watchlists,tab,search,sortK,sortA]);
+  },[data,activeWL,watchlists,tab,search,sortK,sortA,macdSlopeMin,macdSlopeMax,macdPctlMax,setupUptrend]);
 
   var nB=(data&&data.buy_signals||[]).length;
   var nS=(data&&data.sell_signals||[]).length;
   var nT=allStocks.length;
   var nP=allStocks.filter(function(s){return s.in_portfolio}).length;
-  var nSetups=allStocks.filter(function(s){return goldenMatch(s)||(s.buy_breakdown&&s.buy_breakdown.sma200&&s.buy_breakdown.sma200.pass&&(s.macd_phase==='BUY FLIP'||s.macd_phase==='EARLY BUY'))}).length;
+  var nSetups=allStocks.filter(matchSetup).length;
 
   if(loading&&!data)return <div className="ld"><div className="sp"/>Connecting...</div>;
 
@@ -944,7 +1060,7 @@ function App(){
             </div>
             <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'8px'}}><button className="btn btn-sm btn-pu" onClick={fetchZerodhaHoldings}>↻ Refresh</button></div>
             <div className="tc2"><div className="ts"><table>
-              <thead><tr><th>Stock</th><th>Qty</th><th>Invested</th><th>LTP</th><th>P&L</th><th>Return</th><th>Buy</th><th>Sell Score</th><th>MACD</th><th>Verdict</th></tr></thead>
+              <thead><tr><th>Stock</th><th>Qty</th><th>Invested</th><th>LTP</th><th>P&L</th><th>Return</th><th>Entry</th><th>Sell Score</th><th>MACD</th><th>Verdict</th></tr></thead>
               <tbody>{hld.map(function(h){
                 var sc=h.scan;var retPct=h.total_return_pct;
                 var verdict=null;
@@ -961,7 +1077,7 @@ function App(){
                   <td style={{fontWeight:600}}>{'₹'+fmt(h.ltp)}</td>
                   <td style={{color:h.pnl>=0?'var(--gn)':'var(--rd)',fontWeight:700,fontSize:'11px'}}>{(h.pnl>=0?'+':'')+'₹'+fmtVol(Math.abs(h.pnl))}</td>
                   <td><span style={{padding:'3px 8px',borderRadius:'4px',fontSize:'10px',fontWeight:700,background:retPct>=0?'var(--gg)':'var(--rg)',color:retPct>=0?'var(--gn)':'var(--rd)'}}>{(retPct>=0?'+':'')+retPct.toFixed(1)+'%'}</span></td>
-                  <td><span style={{fontSize:'10px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}}>{sc?sc.buy_score:'—'}</span></td>
+                  <td><span style={{fontSize:'10px',color:'var(--t3)',fontFamily:"'JetBrains Mono'"}} title="Composite entry (max of momentum & pullback)">{sc?sc.cherry_points:'—'}</span></td>
                   <td>{sc?<span className={'score score-sell '+(sc.sell_score>=65?'strong':'')} style={{fontSize:'12px'}}>{sc.sell_score||0}</span>:<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>}</td>
                   <td>{sc?<MACDSlope slope={sc.macd_slope} phase={sc.macd_phase} curve={sc.macd_curve} zeroY={sc.macd_zero_y} macdVal={sc.macd}/>:<span style={{color:'var(--t3)',fontSize:'10px'}}>—</span>}</td>
                   <td>{verdict}</td>
@@ -974,13 +1090,44 @@ function App(){
       :tab==='sectors'?<SectorDashboard/>
 
       :/* Main Stock Table */
+      <React.Fragment>
+      {tab==='setups' && <div style={{background:'var(--cd)',border:'1px solid var(--bd)',borderRadius:'11px',padding:'14px 16px',marginBottom:'12px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px',flexWrap:'wrap',gap:'8px'}}>
+          <div style={{fontSize:'12px',fontWeight:800,color:'var(--t1)'}}>{'🎯 MACD Setup Scanner'}</div>
+          <button className="btn btn-sm" onClick={function(){setMacdSlopeMin(-0.1);setMacdSlopeMax(0.5);setMacdPctlMax(30);setSetupUptrend(false)}}>Reset</button>
+        </div>
+        <div style={{fontSize:'10px',color:'var(--t3)',marginBottom:'12px'}}>Find stocks whose MACD slope just flipped up while the MACD is still near its 1-year low.</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))',gap:'16px'}}>
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:'10px',fontWeight:700,color:'var(--t3)',marginBottom:'4px'}}><span>MACD slope ≥ (min)</span><span style={{fontFamily:"'JetBrains Mono'",color:'var(--gn)'}}>{macdSlopeMin.toFixed(2)}</span></div>
+            <input type="range" min="-1" max="1" step="0.05" value={macdSlopeMin} onChange={function(e){setMacdSlopeMin(parseFloat(e.target.value))}}/>
+          </div>
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:'10px',fontWeight:700,color:'var(--t3)',marginBottom:'4px'}}><span>MACD slope ≤ (max)</span><span style={{fontFamily:"'JetBrains Mono'",color:'var(--gn)'}}>{macdSlopeMax.toFixed(2)}</span></div>
+            <input type="range" min="-1" max="1" step="0.05" value={macdSlopeMax} onChange={function(e){setMacdSlopeMax(parseFloat(e.target.value))}}/>
+          </div>
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:'10px',fontWeight:700,color:'var(--t3)',marginBottom:'4px'}}><span>MACD %ile ≤ (0 = at 1Y low)</span><span style={{fontFamily:"'JetBrains Mono'",color:'var(--gn)'}}>{macdPctlMax}</span></div>
+            <input type="range" min="0" max="100" step="5" value={macdPctlMax} onChange={function(e){setMacdPctlMax(parseInt(e.target.value,10))}}/>
+          </div>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'10px',flexWrap:'wrap',gap:'8px'}}>
+          <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'11px',color:'var(--t2)',cursor:'pointer'}}>
+            <input type="checkbox" checked={setupUptrend} onChange={function(e){setSetupUptrend(e.target.checked)}} style={{width:'auto',cursor:'pointer'}}/>
+            {'Uptrend only (price > SMA200)'}
+          </label>
+          <span style={{fontSize:'11px',fontWeight:700,color:'var(--gn)'}}>{stocks.length+' match'}</span>
+        </div>
+      </div>}
       <div className="tc2">
         {stocks.length===0?<div className="empty"><div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div><div style={{fontSize:'13px'}}>{search?'No match for "'+search+'"':isSc?'Scanning...':'No data yet. Click Scan to start.'}</div></div>
         :<div className="ts"><table>
           <thead><tr>
-            <th onClick={function(){doSort('symbol')}}>Stock</th>
+            <th onClick={function(){doSort('symbol')}} style={{width:'200px'}}>Stock</th>
             <th onClick={function(){doSort('price')}}>Price</th>
-            <th onClick={function(){doSort('buy_score')}}>Buy</th>
+            <th title="252-day price line">1Y</th>
+            <th onClick={function(){doSort('momentum_score')}} title="Trend-continuation / buy-and-hold quality">Mom</th>
+            <th onClick={function(){doSort('pullback_score')}} title="Buy-the-dip in an uptrend">Pull</th>
             <th onClick={function(){doSort('sell_score')}}>Sell</th>
             <th onClick={function(){doSort('macd_slope')}}>MACD</th>
             <th onClick={function(){doSort('price_accel')}}>Price</th>
@@ -991,9 +1138,11 @@ function App(){
             <th>Signal</th>
           </tr></thead>
           <tbody>{stocks.map(function(s){return <tr key={s.symbol} onClick={function(){setSel(s)}} style={{cursor:'pointer'}}>
-            <td><div className="sn"><span className="sns">{s.name}</span>{goldenMatch(s) && <span style={{display:'inline-block',padding:'1px 5px',borderRadius:'3px',fontSize:'9px',fontWeight:700,background:'rgba(217,119,6,.12)',color:'#b45309',marginLeft:'4px'}}>★ GOLDEN</span>}{s.in_portfolio && <span className="pb">HELD</span>}<br/><span className="snn">{s.symbol}{s.avg_vol_20?' · Vol '+fmtVol(s.avg_vol_20):''}<ITags indices={s.indices}/></span></div></td>
+            <td className="stockcell"><div className="sn"><span className="sns">{s.name}</span>{goldenMatch(s) && <span title="Golden Buy" style={{display:'inline-block',padding:'0 4px',borderRadius:'3px',fontSize:'10px',fontWeight:700,background:'rgba(217,119,6,.12)',color:'#b45309',marginLeft:'4px',verticalAlign:'middle'}}>★</span>}{s.in_portfolio && <span className="pb">HELD</span>}<span className="snn">{s.symbol}{s.avg_vol_20?' · '+fmtVol(s.avg_vol_20):''}<ITags indices={s.indices} max={2}/></span></div></td>
             <td style={{fontWeight:600,fontSize:'14px'}}>{cur}{fmt(s.price)}</td>
-            <td><span className={'score score-buy '+(s.buy_score>=75?'strong':'')}>{s.buy_score}</span></td>
+            <td><PriceSpark data={s.price_history}/></td>
+            <td><span className={'score score-buy '+(s.momentum_score>=75?'strong':'')}>{s.momentum_score!=null?s.momentum_score:'—'}</span></td>
+            <td><span className="score" style={{color:'var(--pu)',background:'rgba(139,92,246,.12)',fontWeight:700}}>{s.pullback_score!=null?s.pullback_score:'—'}</span></td>
             <td><span className={'score score-sell '+(s.sell_score>=65?'strong':'')}>{s.sell_score||0}</span></td>
             <td><MACDSlope slope={s.macd_slope} phase={s.macd_phase} curve={s.macd_curve} zeroY={s.macd_zero_y} macdVal={s.macd}/></td>
             <td><PriceAccel vel={s.price_vel} accel={s.price_accel} upDays={s.up_days}/></td>
@@ -1001,10 +1150,11 @@ function App(){
             <td>{s.risk_in_atrs!=null?<span style={{fontSize:'13px',fontWeight:700,color:s.risk_in_atrs>=1.5?'var(--gn)':s.risk_in_atrs>=1?'var(--am)':'var(--rd)'}}>{s.risk_in_atrs.toFixed(1)}<span style={{fontSize:'9px',color:'var(--t3)'}}> ATR</span></span>:<span style={{color:'var(--t3)',fontSize:'12px'}}>—</span>}</td>
             <td><div style={{display:'flex',flexDirection:'column'}}><span style={{fontSize:'13px',fontWeight:700,color:'var(--t2)'}}>{s.capital_needed?cur+fmtVol(s.capital_needed):'—'}</span>{s.potential_profit>0&&<span style={{fontSize:'10px',color:'var(--gn)'}}>{'→'+cur+fmtVol(s.potential_profit)}</span>}</div></td>
             <td>{s.roc_pct!=null&&s.roc_pct>0?<span style={{fontSize:'13px',fontWeight:700,color:s.roc_pct>=10?'var(--gn)':s.roc_pct>=5?'var(--am)':'var(--t2)'}}>{s.roc_pct.toFixed(1)}%</span>:<span style={{color:'var(--t3)',fontSize:'12px'}}>—</span>}</td>
-            <td>{goldenMatch(s)?<span className="sig" style={{background:'rgba(217,119,6,.12)',color:'#b45309',border:'1px solid rgba(217,119,6,.3)',fontWeight:800}}>★ GOLDEN</span>:s.buy_score>=75?<span className="sig sig-b">STRONG BUY</span>:s.buy_score>=60?<span className="sig sig-mb">MOD BUY</span>:s.sell_score>=65?<span className="sig sig-s">STRONG SELL</span>:s.sell_score>=45?<span className="sig" style={{background:'rgba(239,68,68,.08)',color:'#f87171',border:'1px solid rgba(239,68,68,.2)'}}>MOD SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
+            <td>{goldenMatch(s)?<span className="sig" style={{background:'rgba(217,119,6,.12)',color:'#b45309',border:'1px solid rgba(217,119,6,.3)',fontWeight:800}}>★ GOLDEN</span>:s.cherry_points>=75?<span className="sig sig-b">{s.entry_signal||'STRONG ENTRY'}</span>:s.cherry_points>=60?<span className="sig sig-mb">{s.entry_signal||'ENTRY READY'}</span>:s.sell_score>=65?<span className="sig sig-s">STRONG SELL</span>:s.sell_score>=45?<span className="sig" style={{background:'rgba(239,68,68,.08)',color:'#f87171',border:'1px solid rgba(239,68,68,.2)'}}>MOD SELL</span>:<span className="sig sig-h">HOLD</span>}</td>
           </tr>})}</tbody>
         </table></div>}
-      </div>}
+      </div>
+      </React.Fragment>}
     </main>
     {sel && <Modal s={sel} onClose={function(){setSel(null)}} watchlists={watchlists} onAddToWL={toggleInWL} isGolden={goldenMatch(sel)}/>}
   </div>;

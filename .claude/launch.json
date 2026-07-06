@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "signalscope-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["Start.py"],
+      "port": 5000
+    }
+  ]
+}
